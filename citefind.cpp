@@ -61,6 +61,11 @@ void clean_up() {
   }
 }
 
+void add_to_error_and_exit(string msg) {
+  append(myerror, msg, "\n");
+  exit(1);
+}
+
 string journal_abbreviation(string journal_name) {
   auto parts=split(journal_name);
   if (parts.size() == 1) {
@@ -796,17 +801,15 @@ void parse_args(int argc, char **argv) {
 void connect_to_database(MySQL::Server& server) {
   server.connect("rda-db.ucar.edu", "metadata", "metadata", "");
   if (!server) {
-    append(myerror, "unable to connect to the database", "\n");
-    exit(1);
+    add_to_error_and_exit("unable to connect to the database");
   }
 }
 
 void fill_journal_abbreviations(MySQL::Server& server) {
   MySQL::LocalQuery q("*", "citation.journal_abbreviations");
   if (q.submit(server) < 0) {
-    append(myerror, "unable to get journal abbreviatons: '" + q.error() + "'",
-        "\n");
-    exit(1);
+    add_to_error_and_exit("unable to get journal abbreviatons: '" + q.error() +
+        "'");
   }
   for (const auto& r : q) {
     g_journal_abbreviations.emplace(r[0], r[1]);
@@ -816,9 +819,8 @@ void fill_journal_abbreviations(MySQL::Server& server) {
 void fill_journals_no_abbreviation(MySQL::Server& server) {
   MySQL::LocalQuery q("*", "citation.journal_no_abbreviation");
   if (q.submit(server) < 0) {
-    append(myerror, "unable to get journals with no abbrevations: '" + q.error()
-        + "'", "\n");
-    exit(1);
+    add_to_error_and_exit("unable to get journals with no abbrevations: '" + q.
+        error() + "'");
   }
   for (const auto& r : q) {
     g_journals_no_abbreviation.emplace(r[0]);
@@ -828,13 +830,20 @@ void fill_journals_no_abbreviation(MySQL::Server& server) {
 void fill_publisher_fixups(MySQL::Server& server) {
   MySQL::LocalQuery q("*", "citation.publisher_fixups");
   if (q.submit(server) < 0) {
-    append(myerror, "unable to get publisher fixups: '" + q.error() + "'",
-        "\n");
-    exit(1);
+    add_to_error_and_exit("unable to get publisher fixups: '" + q.error() +
+        "'");
   }
   for (const auto& r : q) {
     g_publisher_fixups.emplace(r[0], r[1]);
   }
+}
+
+void read_config() {
+  std::ifstream ifs("./citefind.cnf");
+  if (!ifs.is_open()) {
+    add_to_error_and_exit("unable to open configuration file");
+  }
+  ifs.close();
 }
 
 int main(int argc, char **argv) {
@@ -845,6 +854,7 @@ int main(int argc, char **argv) {
   fill_journal_abbreviations(srv);
   fill_journals_no_abbreviation(srv);
   fill_publisher_fixups(srv);
+  read_config();
   vector<string> doi_list;
   MySQL::LocalQuery q("select distinct doi,dsid from dssdb.dsvrsn where dsid != 'ds999.9'");
   if (q.submit(srv) < 0) {
