@@ -25,6 +25,8 @@ using std::this_thread::sleep_for;
 using std::to_string;
 using std::unordered_map;
 using std::unordered_set;
+using std::vector;
+using strutils::append;
 using strutils::replace_all;
 using strutils::split;
 using strutils::sql_ready;
@@ -36,8 +38,8 @@ string mywarning = "";
 const string TMPDIR = "/glade/scratch/dattore/citefind";
 stringstream g_myoutput;
 stringstream g_mail_message;
-unordered_map<string, string> journal_abbreviations, publisher_fixups;
-unordered_set<string> journal_no_abbreviation;
+unordered_map<string, string> g_journal_abbreviations, g_publisher_fixups;
+unordered_set<string> g_journals_no_abbreviation;
 const regex email_re("(.)*@(.)*\\.(.)*");
 auto g_do_clean = true;
 
@@ -73,9 +75,9 @@ string journal_abbreviation(string journal_name) {
     if (last_count > 0) {
       abbreviation+=" ";
     }
-    if (journal_abbreviations.find(part) != journal_abbreviations.end()) {
-      abbreviation+=journal_abbreviations[part];
-      last_count=journal_abbreviations[part].length();
+    if (g_journal_abbreviations.find(part) != g_journal_abbreviations.end()) {
+      abbreviation+=g_journal_abbreviations[part];
+      last_count=g_journal_abbreviations[part].length();
       count+=last_count;
     } else {
       abbreviation+=part;
@@ -570,15 +572,15 @@ void query_elsevier(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
               if (publisher.empty()) {
                 publisher = publisher_from_cross_ref(sdoi);
               }
-              if (publisher_fixups.find(publisher) != publisher_fixups.end()) {
-                publisher = publisher_fixups[publisher];
+              if (g_publisher_fixups.find(publisher) != g_publisher_fixups.end()) {
+                publisher = g_publisher_fixups[publisher];
               } else {
                 if (regex_search(publisher, email_re)) {
-                  if (publisher_fixups.find(publisher) == publisher_fixups.
+                  if (g_publisher_fixups.find(publisher) == g_publisher_fixups.
                       end()) {
                     myerror += "\n**SUSPECT PUBLISHER: '" + publisher + "'";
                   } else {
-                    publisher = publisher_fixups[publisher];
+                    publisher = g_publisher_fixups[publisher];
                   }
                 }
               }
@@ -633,7 +635,7 @@ void query_elsevier(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
                     "prism:publicationName"].to_string();
                 auto a = journal_abbreviation(pubnam);
                 if (a == pubnam && a.find(" ") != string::npos &&
-                    journal_no_abbreviation.find(a) == journal_no_abbreviation.
+                    g_journals_no_abbreviation.find(a) == g_journals_no_abbreviation.
                     end()) {
                   myerror += "\nPublication '" + pubnam + "' has no "
                       "abbreviation and is not marked as such";
@@ -769,25 +771,19 @@ void query_elsevier(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
   }
 }
 
-int main(int argc, char **argv) {
-  if (argc > 1 && string(argv[1]) == "--help") {
-    cerr << "usage: citefind [-k]" << endl;
-    cerr << "\noptions:" << endl;
-    cerr << "-k   don't clean the json files from the APIs (default is to clean)" << endl;
-    exit(1);
-  }
-  atexit(clean_up);
-  MySQL::Server srv("rda-db.ucar.edu", "metadata", "metadata", "");
-  if (!srv) {
-    myerror += "\nunable to connect to the database";
-    exit(1);
-  }
-  MySQL::LocalQuery q("*", "citation.journal_abbreviations");
-  if (q.submit(srv) < 0) {
-    myerror += "\nunable to get journal abbreviatons: '" + q.error() + "'";
-    exit(1);
-  }
+void show_usage_and_exit() {
+  cerr << "usage: citefind [-k]" << endl;
+  cerr << "\noptions:" << endl;
+  cerr << "-k   don't clean the json files from the APIs (default is to clean)"
+      << endl;
+  exit(1);
+}
+
+void parse_args(int argc, char **argv) {
   if (argc > 1) {
+    if (string(argv[1]) == "--help") {
+      show_usage_and_exit();
+    }
     for (auto n = 1; n < argc; ++n) {
       auto arg = string(argv[n]);
       if (arg == "-k") {
@@ -795,27 +791,62 @@ int main(int argc, char **argv) {
       }
     }
   }
-  for (const auto& r : q) {
-    journal_abbreviations.emplace(r[0], r[1]);
+}
+
+void connect_to_database(MySQL::Server& server) {
+  server.connect("rda-db.ucar.edu", "metadata", "metadata", "");
+  if (!server) {
+    append(myerror, "unable to connect to the database", "\n");
+    exit(1);
   }
-  q.set("*", "citation.journal_no_abbreviation");
-  if (q.submit(srv) < 0) {
-    myerror += "\nunable to get journals with no abbrevations: '" + q.error() +
-        "'";
+}
+
+void fill_journal_abbreviations(MySQL::Server& server) {
+  MySQL::LocalQuery q("*", "citation.journal_abbreviations");
+  if (q.submit(server) < 0) {
+    append(myerror, "unable to get journal abbreviatons: '" + q.error() + "'",
+        "\n");
     exit(1);
   }
   for (const auto& r : q) {
-    journal_no_abbreviation.emplace(r[0]);
+    g_journal_abbreviations.emplace(r[0], r[1]);
   }
-  q.set("*", "citation.publisher_fixups");
-  if (q.submit(srv) < 0) {
-    myerror += "\nunable to get publisher fixups: '" + q.error() + "'";
+}
+
+void fill_journals_no_abbreviation(MySQL::Server& server) {
+  MySQL::LocalQuery q("*", "citation.journal_no_abbreviation");
+  if (q.submit(server) < 0) {
+    append(myerror, "unable to get journals with no abbrevations: '" + q.error()
+        + "'", "\n");
     exit(1);
   }
   for (const auto& r : q) {
-    publisher_fixups.emplace(r[0], r[1]);
+    g_journals_no_abbreviation.emplace(r[0]);
   }
-  q.set("select distinct doi,dsid from dssdb.dsvrsn where dsid != 'ds999.9'");
+}
+
+void fill_publisher_fixups(MySQL::Server& server) {
+  MySQL::LocalQuery q("*", "citation.publisher_fixups");
+  if (q.submit(server) < 0) {
+    append(myerror, "unable to get publisher fixups: '" + q.error() + "'",
+        "\n");
+    exit(1);
+  }
+  for (const auto& r : q) {
+    g_publisher_fixups.emplace(r[0], r[1]);
+  }
+}
+
+int main(int argc, char **argv) {
+  parse_args(argc, argv);
+  atexit(clean_up);
+  MySQL::Server srv;
+  connect_to_database(srv);
+  fill_journal_abbreviations(srv);
+  fill_journals_no_abbreviation(srv);
+  fill_publisher_fixups(srv);
+  vector<string> doi_list;
+  MySQL::LocalQuery q("select distinct doi,dsid from dssdb.dsvrsn where dsid != 'ds999.9'");
   if (q.submit(srv) < 0) {
     myerror += "\nunable to obtain list of RDA DOIs: '" + q.error() + "'";
     exit(1);
