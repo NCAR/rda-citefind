@@ -192,9 +192,8 @@ bool inserted_book_data(string isbn, MySQL::Server& server) {
   return true;
 }
 
-void query_crossref(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
-  for (const auto& row : rda_doi_query) {
-    auto doi = row[0];
+void query_crossref(vector<string>& doi_list, MySQL::Server& server) {
+  for (const auto& doi : doi_list) {
     auto filename = doi;
     replace_all(filename, "/", "@@");
     filename = g_config_data.tmpdir + "/" + filename + ".crossref.json";
@@ -504,10 +503,9 @@ string publisher_from_cross_ref(string subj_doi) {
   return "";
 }
 
-void query_elsevier(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
+void query_elsevier(vector<string>& doi_list, MySQL::Server& server) {
   const string API_KEY = "7f662041fde0ff55f7aea7e7727763cd";
-  for (const auto& row : rda_doi_query) {
-    auto doi = row[0];
+  for (const auto& doi : doi_list) {
     auto pgnum = 0;
     auto totres = 0x7fffffff;
     while (pgnum < totres) {
@@ -975,6 +973,18 @@ void fill_doi_list(vector<string>& doi_list) {
   }
 }
 
+void print_publisher_list(MySQL::Server& server) {
+  MySQL::LocalQuery q("distinct publisher", "citation.works");
+  if (q.submit(server) < 0) {
+    add_to_error_and_exit("unable to get list of pubishers from 'works' table: "
+        "'" + q.error() + "'");
+  }
+  g_myoutput << "\nCurrent Publisher List:" << endl;
+  for (const auto& r : q) {
+    g_myoutput << "Publisher: '" << r[0] << "'" << endl;
+  }
+}
+
 int main(int argc, char **argv) {
   atexit(clean_up);
   read_config();
@@ -990,23 +1000,9 @@ for (const auto& e : doi_list) {
 cerr << e << endl;
 }
 exit(1);
-  MySQL::LocalQuery q("select distinct doi,dsid from dssdb.dsvrsn where dsid != 'ds999.9'");
-  if (q.submit(srv) < 0) {
-    myerror += "\nunable to obtain list of RDA DOIs: '" + q.error() + "'";
-    exit(1);
-  }
-  query_crossref(q, srv);
-  query_elsevier(q, srv);
-  q.set("distinct publisher", "citation.works");
-  if (q.submit(srv) < 0) {
-    myerror += "\nunable to get list of pubishers from 'works' table: '" +
-        q.error() + "'";
-    exit(1);
-  }
+  query_crossref(doi_list, srv);
+  query_elsevier(doi_list, srv);
+  print_publisher_list(srv);
   srv.disconnect();
-  g_myoutput << "\nCurrent Publisher List:" << endl;
-  for (const auto& r : q) {
-    g_myoutput << "Publisher: '" << r[0] << "'" << endl;
-  }
   exit(0);
 }
