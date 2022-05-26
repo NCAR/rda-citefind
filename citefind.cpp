@@ -14,7 +14,9 @@
 
 using std::cerr;
 using std::chrono::seconds;
+using std::cout;
 using std::endl;
+using std::find;
 using std::ifstream;
 using std::regex;
 using std::regex_search;
@@ -35,18 +37,52 @@ using strutils::substitute;
 string myerror = "";
 string mywarning = "";
 
-const string TMPDIR = "/glade/scratch/dattore/citefind";
+struct Args {
+  Args() : center(), clean_tmpdir(true) { }
+
+  string center;
+  bool clean_tmpdir;
+} g_args;
+
+struct ConfigData {
+  struct Center {
+    Center() : id(), db_data(), api_data() { }
+
+    struct DB_Data {
+      DB_Data() : host(), username(), password(), doi_query(), insert_table()
+      { }
+
+      string host, username, password;
+      string doi_query, insert_table;
+    };
+
+    struct API_Data {
+      API_Data() : url(), doi_response() { }
+
+      string url, doi_response;
+    };
+
+    string id;
+    DB_Data db_data;
+    API_Data api_data;
+  };
+
+  ConfigData() : tmpdir(), centers() { }
+
+  string tmpdir;
+  vector<Center> centers;
+} g_config_data;
+
 stringstream g_myoutput;
 stringstream g_mail_message;
 unordered_map<string, string> g_journal_abbreviations, g_publisher_fixups;
 unordered_set<string> g_journals_no_abbreviation;
 const regex email_re("(.)*@(.)*\\.(.)*");
-auto g_do_clean = true;
 
 void clean_up() {
-  if (g_do_clean) {
+  if (g_args.clean_tmpdir) {
     stringstream oss, ess;
-    unixutils::mysystem2("/bin/tcsh -c \"/bin/rm -f " + TMPDIR + "/*.json\"",
+    unixutils::mysystem2("/bin/tcsh -c \"/bin/rm -f " + g_config_data.tmpdir + "/*.json\"",
         oss, ess);
   }
   if (!myerror.empty()) {
@@ -96,7 +132,7 @@ string journal_abbreviation(string journal_name) {
 }
 
 bool inserted_book_data(string isbn, MySQL::Server& server) {
-  auto fn_isbn = TMPDIR + "/cache/" + isbn;
+  auto fn_isbn = g_config_data.tmpdir + "/cache/" + isbn;
   struct stat buf;
   if (stat((fn_isbn + ".google.json").c_str(),&buf) != 0) {
     sleep_for(seconds(1));
@@ -161,7 +197,7 @@ void query_crossref(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
     auto doi = row[0];
     auto filename = doi;
     replace_all(filename, "/", "@@");
-    filename = TMPDIR + "/" + filename + ".crossref.json";
+    filename = g_config_data.tmpdir + "/" + filename + ".crossref.json";
     auto ntry = 0;
     string try_error;
     while (ntry < 3) {
@@ -204,7 +240,7 @@ void query_crossref(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
             }
             auto sdoi_fn = sdoi;
             replace_all(sdoi_fn, "/", "@@");
-            sdoi_fn = TMPDIR + "/" + sdoi_fn;
+            sdoi_fn = g_config_data.tmpdir + "/" + sdoi_fn;
             if (stat((sdoi_fn + ".crossref.json").c_str(), &buf) != 0) {
               sleep_for(seconds(3));
               stringstream oss, ess;
@@ -379,7 +415,7 @@ void query_crossref(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
 string cache_file(string doi) {
   string fnam = doi;
   replace_all(fnam, "/", "@@");
-  fnam = TMPDIR + "/cache/" + fnam + ".crossref.json";
+  fnam = g_config_data.tmpdir + "/cache/" + fnam + ".crossref.json";
   struct stat buf;
   if (stat(fnam.c_str(), &buf) != 0) {
     sleep_for(seconds(1));
@@ -477,7 +513,7 @@ void query_elsevier(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
     while (pgnum < totres) {
       auto filename = doi;
       replace_all(filename, "/", "@@");
-      filename = TMPDIR + "/" + filename + ".elsevier." + to_string(pgnum) +
+      filename = g_config_data.tmpdir + "/" + filename + ".elsevier." + to_string(pgnum) +
           ".json";
       string url = "https://api.elsevier.com/content/search/scopus?start=" +
           to_string(pgnum) + "&query=ALL:" + doi + "&field=prism:doi,prism:url,"
@@ -540,7 +576,7 @@ void query_elsevier(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
               auto sp = split(doi_obj["search-results"]["entry"][n][
                   "prism:url"].to_string(), "/");
               auto scopus_id = sp.back();
-              auto authfil = TMPDIR + "/cache/scopus_id_" + scopus_id +
+              auto authfil = g_config_data.tmpdir + "/cache/scopus_id_" + scopus_id +
                   ".elsevier.json";
               if (stat(authfil.c_str(), &buf) != 0) {
                 sleep_for(seconds(1));
@@ -776,24 +812,93 @@ void query_elsevier(MySQL::LocalQuery& rda_doi_query, MySQL::Server& server) {
   }
 }
 
+void read_config() {
+  std::ifstream ifs("./citefind.cnf");
+  if (!ifs.is_open()) {
+    add_to_error_and_exit("unable to open configuration file");
+  }
+  JSON::Object o(ifs);
+  ifs.close();
+  if (o["temp_dir"].type() == JSON::ValueType::String) {
+    g_config_data.tmpdir = o["temp_dir"].to_string();
+  }
+  if (g_config_data.tmpdir.empty()) {
+    add_to_error_and_exit("temporary directory not specified in config");
+  }
+  struct stat buf;
+  if (stat(g_config_data.tmpdir.c_str(), &buf) != 0) {
+    add_to_error_and_exit("temporary directory '" + g_config_data.tmpdir +
+        "' is missing");
+  }
+  auto& arr = o["centers"];
+  for (size_t n = 0; n < arr.size(); ++n) {
+    auto& a = arr[n];
+    g_config_data.centers.emplace_back(ConfigData::Center());
+    auto& c = g_config_data.centers.back();
+    c.id = a["id"].to_string();
+    if (a["db"].type() != JSON::ValueType::Nonexistent) {
+      auto& db = a["db"];
+      c.db_data.host = db["host"].to_string();
+      c.db_data.username = db["username"].to_string();
+      c.db_data.password = db["password"].to_string();
+      c.db_data.insert_table = db["insert"].to_string();
+      if (db["doi"].type() != JSON::ValueType::Nonexistent) {
+        c.db_data.doi_query = db["doi"].to_string();
+      }
+    }
+    if (a["api"].type() != JSON::ValueType::Nonexistent) {
+      auto& api = a["api"];
+      c.api_data.url = api["url"].to_string();
+      c.api_data.doi_response = api["response"]["doi"].to_string();
+    }
+  }
+}
+
 void show_usage_and_exit() {
-  cerr << "usage: citefind [-k]" << endl;
+  cerr << "usage: citefind CENTER [-k]" << endl;
+  cerr << "usage: citefind --help" << endl;
+  cerr << "usage: citefind --show-centers" << endl;
+  cerr << "\nrequired:" << endl;
+  cerr << "CENTER  data center for which to get citation statistics" << endl;
   cerr << "\noptions:" << endl;
   cerr << "-k   don't clean the json files from the APIs (default is to clean)"
       << endl;
   exit(1);
 }
 
+void show_centers_and_exit() {
+  cout << "Known data centers:" << endl;
+  for (const auto& c : g_config_data.centers) {
+    cout << "  " << c.id << endl;
+  }
+  cout << "\nAdd additional centers to the configuration file" << endl;
+  exit(0);
+}
+
 void parse_args(int argc, char **argv) {
+  string a1;
   if (argc > 1) {
-    if (string(argv[1]) == "--help") {
-      show_usage_and_exit();
+    a1 = argv[1];
+  }
+  if (argc < 2 || a1 == "--help") {
+    show_usage_and_exit();
+  }
+  if (a1 == "--show-centers") {
+    show_centers_and_exit();
+  }
+  for (const auto& c : g_config_data.centers) {
+    if (c.id == a1) {
+      g_args.center = a1;
+      break;
     }
-    for (auto n = 1; n < argc; ++n) {
-      auto arg = string(argv[n]);
-      if (arg == "-k") {
-        g_do_clean = false;
-      }
+  }
+  if (g_args.center.empty()) {
+    add_to_error_and_exit("center '" + a1 + "' is not configured");
+  }
+  for (auto n = 2; n < argc; ++n) {
+    auto arg = string(argv[n]);
+    if (arg == "-k") {
+      g_args.clean_tmpdir = false;
     }
   }
 }
@@ -838,32 +943,56 @@ void fill_publisher_fixups(MySQL::Server& server) {
   }
 }
 
-void read_config() {
-  std::ifstream ifs("./citefind.cnf");
-  if (!ifs.is_open()) {
-    add_to_error_and_exit("unable to open configuration file");
+void fill_doi_list_from_db(const ConfigData::Center& c, vector<string>&
+    doi_list) {
+  MySQL::Server srv(c.db_data.host, c.db_data.username, c.db_data.password, "");
+  if (!srv) {
+    add_to_error_and_exit("unable to connect to MySQL server for the DOI list");
   }
-  ifs.close();
+  MySQL::LocalQuery q(c.db_data.doi_query);
+  if (q.submit(srv) < 0) {
+    add_to_error_and_exit("mysql error '" + q.error() + "' while getting the "
+        "DOI list");
+  }
+  doi_list.reserve(q.num_rows());
+  for (const auto& r : q) {
+    doi_list.emplace_back(r[0]);
+  }
+}
+
+void fill_doi_list(vector<string>& doi_list) {
+  for (const auto& c : g_config_data.centers) {
+    if (c.id == g_args.center) {
+      if (!c.db_data.doi_query.empty()) {
+        fill_doi_list_from_db(c, doi_list);
+      } else if (!c.api_data.url.empty()) {
+      } else {
+        add_to_error_and_exit("can't figure out how to get the list of DOIs "
+            "from the current configuration");
+      }
+    }
+    break;
+  }
 }
 
 int main(int argc, char **argv) {
-  parse_args(argc, argv);
   atexit(clean_up);
+  read_config();
+  parse_args(argc, argv);
   MySQL::Server srv;
   connect_to_database(srv);
   fill_journal_abbreviations(srv);
   fill_journals_no_abbreviation(srv);
   fill_publisher_fixups(srv);
-  read_config();
   vector<string> doi_list;
+  fill_doi_list(doi_list);
+for (const auto& e : doi_list) {
+cerr << e << endl;
+}
+exit(1);
   MySQL::LocalQuery q("select distinct doi,dsid from dssdb.dsvrsn where dsid != 'ds999.9'");
   if (q.submit(srv) < 0) {
     myerror += "\nunable to obtain list of RDA DOIs: '" + q.error() + "'";
-    exit(1);
-  }
-  struct stat buf;
-  if (stat(TMPDIR.c_str(), &buf) != 0) {
-    myerror += "\ntemporary directory missing";
     exit(1);
   }
   query_crossref(q, srv);
