@@ -19,6 +19,7 @@ using std::cout;
 using std::deque;
 using std::endl;
 using std::find;
+using std::get;
 using std::ifstream;
 using std::make_tuple;
 using std::regex;
@@ -26,6 +27,7 @@ using std::regex_search;
 using std::stoi;
 using std::string;
 using std::stringstream;
+using std::tie;
 using std::this_thread::sleep_for;
 using std::to_string;
 using std::tuple;
@@ -38,6 +40,7 @@ using strutils::split;
 using strutils::sql_ready;
 using strutils::substitute;
 using strutils::to_lower;
+using strutils::to_title;
 using strutils::trim;
 using unixutils::mysystem2;
 
@@ -107,10 +110,13 @@ void query_crossref(vector<tuple<string, string, string>>& doi_list, MySQL::
     Server& server);
 void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
     Server& server);
+void query_wos(vector<tuple<string, string, string>>& doi_list, MySQL::Server&
+    server);
 unordered_map<string, void(*)(vector<tuple<string, string, string>>&, MySQL::
     Server&)> g_services {
   { "crossref", query_crossref },
   { "elsevier", query_elsevier },
+  { "wos", query_wos },
 };
 
 void clean_up() {
@@ -166,25 +172,25 @@ string journal_abbreviation(string journal_name) {
 }
 
 bool inserted_book_data_from_google(string isbn, MySQL::Server& server) {
-  auto fn_isbn = g_config_data.tmpdir + "/cache/" + isbn;
+  auto fn_isbn = g_config_data.tmpdir + "/cache/" + isbn + ".google.json";
   struct stat buf;
-  if (stat((fn_isbn + ".google.json").c_str(),&buf) != 0) {
+  if (stat(fn_isbn.c_str(), &buf) != 0) {
     sleep_for(seconds(1));
     stringstream oss, ess;
-    mysystem2("/bin/tcsh -c \"curl -s -o " + fn_isbn + ".google.json 'https://"
+    mysystem2("/bin/tcsh -c \"curl -s -o " + fn_isbn + " 'https://"
         "www.googleapis.com/books/v1/volumes?q=isbn:" + isbn + "'\"", oss, ess);
     if (!ess.str().empty()) {
       myerror += "\nError retrieving book data from Google";
       return false;
     }
   }
-  ifstream ifs((fn_isbn+".google.json").c_str());
+  ifstream ifs(fn_isbn.c_str());
   auto e = myerror;
   JSON::Object isbn_obj(ifs);
   if (!isbn_obj) {
     myerror = e + "\nError reading JSON : '" + myerror + "'";
     stringstream oss, ess;
-    mysystem2("/bin/rm " + fn_isbn + ".google.json", oss, ess);
+    mysystem2("/bin/rm " + fn_isbn, oss, ess);
     return false;
   }
   if (isbn_obj["items"][0]["volumeInfo"]["authors"].size() == 0) {
@@ -234,25 +240,25 @@ bool inserted_book_data_from_google(string isbn, MySQL::Server& server) {
 }
 
 bool inserted_book_data_from_openlibrary(string isbn, MySQL::Server& server) {
-  auto fn_isbn = g_config_data.tmpdir + "/cache/" + isbn;
+  auto fn_isbn = g_config_data.tmpdir + "/cache/" + isbn + ".openlibrary.json";
   struct stat buf;
-  if (stat((fn_isbn + ".openlibrary.json").c_str(),&buf) != 0) {
+  if (stat(fn_isbn.c_str(), &buf) != 0) {
     sleep_for(seconds(1));
     stringstream oss, ess;
-    mysystem2("/bin/tcsh -c \"curl -s -o " + fn_isbn + ".openlibrary.json "
-        "'https://openlibrary.org/api/books?bibkeys=ISBN:" + isbn + "&jscmd="
+    mysystem2("/bin/tcsh -c \"curl -s -o " + fn_isbn + " 'https://"
+        "openlibrary.org/api/books?bibkeys=ISBN:" + isbn + "&jscmd="
         "details&format=json'\"", oss, ess);
     if (!ess.str().empty()) {
       myerror += "\nError retrieving book data from Open Library";
       return false;
     }
   }
-  ifstream ifs((fn_isbn+".openlibrary.json").c_str());
+  ifstream ifs(fn_isbn.c_str());
   auto e = myerror;
   JSON::Object isbn_obj(ifs);
   if (!isbn_obj) {
     stringstream oss, ess;
-    mysystem2("/bin/rm " + fn_isbn + ".openlibrary.json", oss, ess);
+    mysystem2("/bin/rm " + fn_isbn, oss, ess);
     myerror = e + "\nError reading JSON : '" + myerror + "'";
     return false;
   }
@@ -365,13 +371,13 @@ string cache_file(string doi) {
 
 bool filled_authors_from_cross_ref(string subj_doi, MySQL::Server& server,
     JSON::Object& obj) {
-  auto fnam = cache_file(subj_doi);
-  if (!fnam.empty()) {
-    ifstream ifs(fnam.c_str());
+  auto cfile = cache_file(subj_doi);
+  if (!cfile.empty()) {
+    ifstream ifs(cfile.c_str());
     try {
       obj.fill(ifs);
     } catch (...) {
-      myerror += "\nunable to create JSON object from '" + fnam + "'";
+      myerror += "\nunable to create JSON object from '" + cfile + "'";
       return false;
     }
     ifs.close();
@@ -379,19 +385,19 @@ bool filled_authors_from_cross_ref(string subj_doi, MySQL::Server& server,
       myerror += "\nError reading CrossRef author JSON for works DOI '" +
           subj_doi + "': 'unable to create JSON object'";
       stringstream oss, ess;
-      mysystem2("/bin/tcsh -c \"/bin/rm -f " + fnam + "\"", oss, ess);
+      mysystem2("/bin/tcsh -c \"/bin/rm -f " + cfile + "\"", oss, ess);
       return false;
     }
     auto authlst = obj["message"]["author"];
     for (size_t m = 0; m < authlst.size(); ++m) {
       auto family = substitute(authlst[m]["family"].to_string(), "\\", "\\\\");
       auto given = authlst[m]["given"].to_string();
-      string fnam, mnam;
+      string fname, mname;
       if (!given.empty()) {
         auto sp = split(given);
-        fnam = substitute(sp.front(), "\\", "\\\\");
+        fname = substitute(sp.front(), "\\", "\\\\");
         if (sp.size() > 1) {
-          mnam = substitute(sp.back(), "\\", "\\\\");
+          mname = substitute(sp.back(), "\\", "\\\\");
         }
         auto orcid = authlst[m]["ORCID"].to_string();
         if (orcid.empty()) {
@@ -401,16 +407,16 @@ bool filled_authors_from_cross_ref(string subj_doi, MySQL::Server& server,
         }
         if (server.insert("citation.works_authors", "id, id_type, last_name, "
             "first_name, middle_name, orcid_id, sequence", "'" + subj_doi +
-            "', 'DOI', '" + sql_ready(family) + "', '" + sql_ready(fnam) +
-            "', '" + sql_ready( mnam) + "', " + orcid + ", " + to_string(m),
+            "', 'DOI', '" + sql_ready(family) + "', '" + sql_ready(fname) +
+            "', '" + sql_ready( mname) + "', " + orcid + ", " + to_string(m),
             "update id_type = values(id_type), orcid_id = if(isnull(values("
             "orcid_id)), orcid_id, values(orcid_id)), sequence = values("
             "sequence)") < 0) {
-          myerror += "\nError while inserting author (" + subj_doi + ", DOI, " +
-              family + ", " + fnam + ", " + mnam + "): '" + server.error() +
-              "'";
+          append(myerror, "Error while inserting CrossRef author (" + subj_doi +
+              ", DOI, " + family + ", " + fname + ", " + mname + "): '" +
+              server.error() + "'", "\n");
           stringstream oss, ess;
-          mysystem2("/bin/tcsh -c \"/bin/rm -f " + fnam + "\"", oss, ess);
+          mysystem2("/bin/tcsh -c \"/bin/rm -f " + cfile + "\"", oss, ess);
           return false;
         }
       }
@@ -484,9 +490,9 @@ bool filled_authors_from_scopus(string scopus_url, string API_KEY, string
           sql_ready(lnam) + "', '" + sql_ready(fnam) + "', '" + sql_ready(mnam)
           + "', " + seq, "update id_type = values(id_type), sequence = values("
           "sequence)") < 0) {
-        myerror += "\nError while inserting author (" + subj_doi + ", DOI, " +
-            lnam + ", " + fnam + ", " + mnam + ", " + seq + "): '" + server.
-            error() + "'";
+        append(myerror, "Error while inserting Scopus author (" + subj_doi +
+            ", DOI, " + lnam + ", " + fnam + ", " + mnam + ", " + seq + "): '" +
+            server.error() + "'", "\n");
         return false;
       }
     }
@@ -530,7 +536,7 @@ void reset_new_flag(MySQL::Server& server) {
 size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
     doi_tuple, string& try_error) {
   string doi, publisher, asset_type;
-  std::tie(doi, publisher, asset_type) = doi_tuple;
+  tie(doi, publisher, asset_type) = doi_tuple;
   size_t ntries = 0;
   while (ntries < 3) {
     sleep_for(seconds(ntries * 5));
@@ -588,7 +594,6 @@ size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
             "\n");
         continue;
       }
-
       if (g_args.no_works) {
         continue;
       }
@@ -708,7 +713,7 @@ void query_crossref(vector<tuple<string, string, string>>& doi_list, MySQL::
   g_output << "Querying CrossRef ..." << endl;
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
-    std::tie(doi, publisher, asset_type) = e;
+    tie(doi, publisher, asset_type) = e;
     g_output << "    querying DOI '" << doi << "' (" << publisher << ", " <<
         asset_type << ") ..." << endl;
     string try_error;
@@ -756,7 +761,7 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
   const string API_KEY = g_config_data.api_keys["elsevier"];
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
-    std::tie(doi, publisher, asset_type) = e;
+    tie(doi, publisher, asset_type) = e;
     g_output << "    querying DOI '" << doi << "' (" << publisher << ", " <<
         asset_type << ") ..." << endl;
     auto pgnum = 0;
@@ -841,7 +846,6 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
               "\n");
           continue;
         }
-
         if (g_args.no_works) {
           continue;
         }
@@ -868,28 +872,19 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
           typ = "J";
           auto pubnam = doi_obj["search-results"]["entry"][n][
               "prism:publicationName"].to_string();
-/*
-          auto a = journal_abbreviation(pubnam);
-          if (a == pubnam && a.find(" ") != string::npos &&
-              g_journals_no_abbreviation.find(a) ==
-              g_journals_no_abbreviation.end()) {
-            myerror += "\nPublication '" + pubnam + "' has no abbreviation "
-                "and is not marked as such";
-          }
-*/
           if (server.insert("citation.journal_works", "doi, pub_name, volume, "
-//              "pages", "'" + sdoi + "', '" + sql_ready(a) + "', '" + doi_obj[
-"pages", "'" + sdoi + "', '" + sql_ready(pubnam) + "', '" + doi_obj[
-              "search-results"]["entry"][n]["prism:volume"].to_string() + "', '"
-              + doi_obj["search-results"]["entry"][n]["prism:pageRange"].
-              to_string() + "'", "update pub_name = values(pub_name), volume = "
-              "values(volume), pages = values(pages)") < 0) {
-            myerror += "\nError while inserting Elsevier journal data ('" + sdoi
-//                + "', '" + sql_ready(a) + "', '" + doi_obj["search-results"][
-+ "', '" + sql_ready(pubnam) + "', '" + doi_obj["search-results"][
-                "entry"][n]["prism:volume"].to_string() + "', '" + doi_obj[
-                "search-results"]["entry"][n]["prism:pageRange"].to_string() +
-                "'): '" + server.error() + "'";
+              "pages", "'" + sdoi + "', '" + sql_ready(pubnam) + "', '" +
+              doi_obj["search-results"]["entry"][n]["prism:volume"].to_string()
+              + "', '" + doi_obj["search-results"]["entry"][n][
+              "prism:pageRange"].to_string() + "'", "update pub_name = values("
+              "pub_name), volume = values(volume), pages = values(pages)") <
+              0) {
+            append(myerror, "Error while inserting Elsevier journal data ('" +
+                sdoi + "', '" + sql_ready(pubnam) + "', '" + doi_obj[
+                "search-results"]["entry"][n]["prism:volume"].to_string() +
+                "', '" + doi_obj["search-results"]["entry"][n][
+                "prism:pageRange"].to_string() + "'): '" + server.error() + "'",
+                "\n");
             continue;
           }
         } else if (typ == "Book" || typ == "Book Series") {
@@ -982,6 +977,278 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
   }
   reset_new_flag(server);
   g_output << "... done querying Elsevier." << endl;
+}
+
+tuple<string, string> parse_author_first_name(string fname) {
+  tuple<string, string> t; // return value
+  if (!fname.empty()) {
+    auto sp = split(fname);
+    get<0>(t) = sp.front();
+    sp.pop_front();
+    for (const auto& e : sp) {
+      append(get<1>(t), e, " ");
+    }
+  }
+  return std::move(t);
+}
+
+void fill_authors_from_wos(string doi_work, MySQL::Server& server, const JSON::
+    Value& v) {
+  vector<tuple<string, string, string, string, size_t>> author_names;
+  if (v.type() == JSON::ValueType::Array) {
+    for (size_t n = 0; n < v.size(); ++n) {
+      auto& names = v[n]["names"]["name"];
+      if (names.type() == JSON::ValueType::Array) {
+        for (size_t m = 0; m < names.size(); ++m) {
+          string fname, mname;
+          tie(fname, mname) = parse_author_first_name(names[m]["first_name"].
+              to_string());
+          author_names.emplace_back(make_tuple(fname, mname, names[m][
+              "last_name"].to_string(), names[m]["orcid_id"].to_string(), stoi(
+              names[m]["seq_no"].to_string()) - 1));
+        }
+      } else {
+        string fname, mname;
+        tie(fname, mname) = parse_author_first_name(names["first_name"].
+            to_string());
+        author_names.emplace_back(make_tuple(fname, mname, names["last_name"].
+            to_string(), names["orcid_id"].to_string(), stoi(names["seq_no"].
+            to_string()) - 1));
+      }
+    }
+  } else {
+    auto& names = v["names"]["name"];
+    if (names.type() == JSON::ValueType::Array) {
+      for (size_t m = 0; m < names.size(); ++m) {
+        string fname, mname;
+        tie(fname, mname) = parse_author_first_name(names[m]["first_name"].
+            to_string());
+        author_names.emplace_back(make_tuple(fname, mname, names[m][
+            "last_name"].to_string(), names[m]["orcid_id"].to_string(), stoi(
+            names[m]["seq_no"].to_string()) - 1));
+      }
+    } else {
+      string fname, mname;
+      tie(fname, mname) = parse_author_first_name(names["first_name"].
+          to_string());
+      author_names.emplace_back(make_tuple(fname, mname, names["last_name"].
+          to_string(), names["orcid_id"].to_string(), stoi(names["seq_no"].
+          to_string()) - 1));
+    }
+  }
+  for (const auto& name : author_names) {
+    if (server.insert("citation.works_authors", "id, id_type, last_name, "
+        "first_name, middle_name, orcid_id, sequence", "'" + doi_work + "', "
+        "'DOI', '" + sql_ready(get<2>(name)) + "', '" + sql_ready(get<0>(name))
+        + "', '" + sql_ready(get<1>(name)) + "', '" + get<3>(name) + "', " +
+        to_string(get<4>(name)), "update id_type = values(id_type), sequence = "
+        "values(sequence)") < 0) {
+      append(myerror, "Error while inserting WoS author (DOI " + doi_work +
+          ", '" + get<2>(name) + "', '" + get<0>(name) + "', '" + get<1>(name) +
+          "', '" + get<3>(name) + "', " + to_string(get<4>(name)) + "): '" +
+          server.error() + "'", "\n");
+    }
+  }
+}
+
+void query_wos(vector<tuple<string, string, string>>& doi_list, MySQL::Server&
+    server) {
+return;
+  g_output << "Querying WoS ..." << endl;
+  string api_key_header = "X-ApiKey: " + g_config_data.api_keys["wos"];
+  string doi, publisher, asset_type;
+  for (const auto& e : doi_list) {
+    tie(doi, publisher, asset_type) = e;
+
+    // get the WoS ID for the DOI
+    stringstream oss, ess;
+    if (mysystem2("/bin/tcsh -c \"curl -H '" + api_key_header + "' 'https://"
+        "wos-api.clarivate.com/api/wos/?databaseId=DCI&usrQuery=DO=" + doi +
+        "&count=1&firstRecord=1&viewField=none'\"", oss, ess) < 0) {
+      append(myerror, "Error getting WoS ID for DOI '" + doi + "'", "\n");
+      continue;
+    }
+    JSON::Object o(oss.str());
+    if (!o) {
+      append(myerror, "Wos response for DOI '" + doi + "' ID is not JSON",
+          "\n");
+      continue;
+    }
+    auto wos_id = o["Data"]["Records"]["records"]["REC"][0]["UID"].to_string();
+
+    // get the WoS IDs for the "works" that have cited this DOI
+    vector<string> works_ids;
+    auto first_rec = 1;
+    auto num_records = 2;
+    while (first_rec < num_records) {
+      if (mysystem2("/bin/tcsh -c \"curl -H '" + api_key_header + "' 'https://"
+          "wos-api.clarivate.com/api/wos/citing?databaseId=WOS&uniqueId=" +
+          wos_id + "&count=100&firstRecord=" + to_string(first_rec) +
+          "&viewField='\"", oss, ess) < 0) {
+        append(myerror, "Error getting WoS citation IDs for DOI '" + doi + "'",
+            "\n");
+        continue;
+      }
+      o.fill(oss.str());
+      auto& arr = o["Data"]["Records"]["records"]["REC"];
+      for (size_t n = 0; n < arr.size(); ++n) {
+        works_ids.emplace_back(arr[n]["UID"].to_string());
+      }
+      num_records = stoi(o["QueryResult"]["RecordsFound"].to_string());
+      first_rec += 100;
+    }
+    for (const auto& work_id : works_ids) {
+      string view_field = "identifiers";
+      if (!g_args.no_works) {
+        view_field += "+names+titles+pub_info";
+      }
+      // get the data for each "work"
+      auto cache_fn = g_config_data.tmpdir + "/cache/" + work_id + ".json";
+      struct stat buf;
+      if (stat(cache_fn.c_str(), &buf) != 0) {
+        if (mysystem2("/bin/tcsh -c \"curl -H '" + api_key_header + "' -s -o " +
+            cache_fn + " 'https://wos-api.clarivate.com/api/wos/id/" + work_id +
+            "?databaseId=WOS&count=1&firstRecord=1&viewField=" + view_field +
+            "'\"", oss, ess) < 0) {
+          append(myerror, "Error get WoS work data for ID '" + work_id + "' "
+              "(DOI " + doi + ")", "\n");
+          continue;
+        }
+      }
+      ifstream ifs(cache_fn.c_str());
+      o.fill(ifs);
+      if (!o) {
+        append(myerror, "Error - '" + cache_fn + "' is not a JSON file (DOI " +
+            doi + ")", "\n");
+        continue;
+      }
+      auto& record = o["Data"]["Records"]["records"]["REC"][0];
+      auto& identifiers = record["dynamic_data"]["cluster_related"][
+          "identifiers"]["identifier"];
+      string doi_work;
+      for (size_t n = 0; n < identifiers.size(); ++n) {
+        if (identifiers[n]["type"].to_string() == "doi") {
+          doi_work = identifiers[n]["value"].to_string();
+          break;
+        }
+      }
+      if (doi_work.empty()) {
+        append(myerror, "Missing work DOI for WoS ID '" + work_id + "' (DOI " +
+            doi + ")", "\n");
+        continue;
+      }
+      if (server.insert(g_args.doi_group.db_data.insert_table, "doi_data, "
+          "doi_work, new_flag", "'" + doi + "', '" + doi_work + "', '1'",
+            "update doi_data = values(doi_data)") < 0) {
+        append(myerror, "Error while inserting WoS DOIs (" + doi + ", " +
+            doi_work + "): '" + server.error() + "'", "\n");
+        continue;
+      }
+      if (server.insert("citation.sources", "doi_work, doi_data, source", "'" +
+          doi_work + "', '" + doi + "', 'WoS'", "update source = source") < 0) {
+        append(myerror, "Error updating WoS source for '" + doi_work + "', '" +
+            doi + "'", "\n");
+      }
+      if (server.insert("citation.doi_data", "doi_data, publisher, asset_type",
+          "'" + doi + "', '" + sql_ready(publisher) + "', '" + asset_type + "'",
+          "update publisher = values(publisher), asset_type = values("
+          "asset_type)") < 0) {
+        append(myerror, "Error updating Elsevier DOI data (" + doi + ", " +
+            publisher + ", " + asset_type + "): '" + server.error() + "'",
+            "\n");
+        continue;
+      }
+      if (g_args.no_works) {
+        continue;
+      }
+
+      // add author data for the citing "work"
+      auto& address_names = record["static_data"]["fullrecord_metadata"][
+          "addresses"]["address_name"];
+      fill_authors_from_wos(doi_work, server, address_names);
+
+      // get the type of the "work" and add type-specific data
+      auto& summary = record["static_data"]["summary"];
+      auto& pub_info = summary["pub_info"];
+      auto pubtype = pub_info["pubtype"].to_string();
+      string item_title;
+      if (pubtype == "Journal") {
+        pubtype = "J";
+        auto& titles = summary["titles"]["title"];
+        string pubnam;
+        for (size_t n = 0; n < titles.size(); ++n) {
+          auto type = titles[n]["type"].to_string();
+          if (type == "source") {
+            pubnam = to_title(titles[n]["content"].to_string());
+          } else if (type == "item") {
+            item_title = titles[n]["content"].to_string();
+          }
+        }
+        if (pubnam.empty()) {
+          append(myerror, "Unable to find WoS publication name (" + work_id +
+              ")", "\n");
+          continue;
+        }
+        auto vol = pub_info["vol"].to_string();
+        auto issue = pub_info["issue"].to_string();
+        if (!issue.empty()) {
+          vol += "(" + issue + ")";
+        }
+        if (server.insert("citation.journal_works",
+                          "doi, pub_name, volume, pages",
+                          "'" + doi_work + "', '" + sql_ready(pubnam) + "', '" +
+            vol + "', '" + pub_info["page"]["content"].to_string() + "'",
+                          "update pub_name = values(pub_name), volume = values("
+            "volume), pages = values(pages)") < 0) {
+          append(myerror, "Error while inserting WoS journal data ('" + doi_work
+              + "', '" + sql_ready(pubnam) + "', '" + vol + "', '" + pub_info[
+              "page"]["content"].to_string() + "'): '" + server.error() + "'",
+              "\n");
+          continue;
+        }
+      } else {
+        append(myerror, "Unknown WoS pubtype '" + pubtype + "' (" + work_id +
+            ")", "\n");
+        continue;
+      }
+      if (item_title.empty()) {
+        append(myerror, "Unable to find WoS item title (" + work_id + ")",
+            "\n");
+        continue;
+      }
+
+      // add general data about the "work"
+      auto pubyr = pub_info["pubyear"].to_string();
+      if (!pubyr.empty()) {
+        auto& p = summary["publishers"]["publisher"]["names"]["name"];
+        auto publisher = p["unified_name"].to_string();
+        if (publisher.empty()) {
+          publisher = to_title(p["full_name"].to_string());
+        }
+        if (publisher.empty()) {
+          append(myerror, "**NO WoS PUBLISHER (" + work_id + ")", "\n");
+          continue;
+        }
+        if (server.insert("citation.works", "doi, title, pub_year, type, "
+            "publisher", "'" + doi_work + "', '" + sql_ready(item_title) +
+            "', '" + pubyr + "', '" + pubtype + "', '" + sql_ready(publisher) +
+            "'", "update title = values(title), pub_year = values(pub_year), "
+            "type = values(type), publisher = values(publisher)") < 0) {
+          append(myerror, "Error while WoS inserting work (" + doi_work + ", " +
+                item_title + ", " + pubyr + ", " + pubtype + ", " + publisher +
+                ") from WoS '" + work_id + "': '" + server.error() + "'", "\n");
+            continue;
+          }
+      } else {
+        append(myerror, "**NO WoS PUBLICATION YEAR (" + work_id + ")", "\n");
+      }
+    }
+  }
+  if (g_args.doi_group.id == "rda") {
+    regenerate_dataset_descriptions(server, "WoS");
+  }
+  reset_new_flag(server);
+  g_output << "... done querying WoS." << endl;
 }
 
 void assert_configuration_value(string value_name, const JSON::Value& value,
@@ -1087,7 +1354,7 @@ void read_config() {
 void clean_cache() {
   stringstream oss, ess;
   if (mysystem2("/bin/tcsh -c 'find " + g_config_data.tmpdir + "/cache/* "
-      "-mtime +90 -exec rm {} \\;'", oss, ess) != 0) {
+      "-mtime +180 -exec rm {} \\;'", oss, ess) != 0) {
     add_to_error_and_exit("unable to clean cache - error: '" + ess.str() + "'");
   }
 }
