@@ -84,10 +84,9 @@ struct ConfigData {
     API_Data api_data;
   };
 
-  ConfigData() : tmpdir(), default_asset_type(), api_keys(), doi_groups() { }
+  ConfigData() : tmpdir(), default_asset_type(), doi_groups() { }
 
   string tmpdir, default_asset_type;
-  unordered_map<string, string> api_keys;
   vector<DOI_Group> doi_groups;
 } g_config_data;
 
@@ -98,6 +97,7 @@ struct Args {
   bool clean_tmpdir, no_works;
 } g_args;
 
+MySQL::Server g_server;
 stringstream g_myoutput, g_mail_message;
 unordered_map<string, string> g_journal_abbreviations, g_publisher_fixups;
 unordered_set<string> g_journals_no_abbreviation;
@@ -105,19 +105,10 @@ const regex email_re("(.)*@(.)*\\.(.)*");
 std::ofstream g_output;
 string g_single_doi;
 
-// set up services mapping here
-void query_crossref(vector<tuple<string, string, string>>& doi_list, MySQL::
-    Server& server);
-void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
-    Server& server);
-void query_wos(vector<tuple<string, string, string>>& doi_list, MySQL::Server&
-    server);
-unordered_map<string, void(*)(vector<tuple<string, string, string>>&, MySQL::
-    Server&)> g_services {
-  { "crossref", query_crossref },
-  { "elsevier", query_elsevier },
-  { "wos", query_wos },
-};
+typedef tuple<string, string, string> DOI_DATA;
+typedef vector<DOI_DATA> DOI_LIST;
+typedef tuple<string, string, string, string, bool> SERVICE_DATA;
+unordered_map<string, SERVICE_DATA> g_services;
 
 void clean_up() {
   if (g_args.clean_tmpdir) {
@@ -171,7 +162,7 @@ string journal_abbreviation(string journal_name) {
   return journal_name;
 }
 
-bool inserted_book_data_from_google(string isbn, MySQL::Server& server) {
+bool inserted_book_data_from_google(string isbn) {
   auto fn_isbn = g_config_data.tmpdir + "/cache/" + isbn + ".google.json";
   struct stat buf;
   if (stat(fn_isbn.c_str(), &buf) != 0) {
@@ -214,32 +205,32 @@ bool inserted_book_data_from_google(string isbn, MySQL::Server& server) {
       }
       lnam += sp[n];
     }
-    if (server.insert("citation.works_authors", ("id, id_type, last_name, "
+    if (g_server.insert("citation.works_authors", ("id, id_type, last_name, "
         "first_name, middle_name, sequence"), ("'" + isbn + "', 'ISBN', '" +
         sql_ready(lnam) + "', '" + sql_ready(fnam) + "', '" + sql_ready(mnam) +
         "', " + to_string(m)), "update id_type = values(id_type), sequence = "
         "values(sequence)") < 0) {
       myerror += "\nError while inserting author (" + isbn + ",ISBN," + lnam +
-          "," + fnam + "," + mnam + "): '" + server.error() + "' from Google "
+          "," + fnam + "," + mnam + "): '" + g_server.error() + "' from Google "
           "Books";
       return false;
     }
   }
   auto ttl = substitute(isbn_obj["items"][0]["volumeInfo"]["title"].to_string(),
       "\\", "\\\\");
-  if (server.insert("citation.book_works", "isbn, title, publisher", "'" + isbn
-      + "', '" + sql_ready(ttl) + "', '" + isbn_obj["items"][0]["volumeInfo"][
-      "publisher"].to_string() + "'", "update title = values(title), publisher "
-      "= values(publisher)") < 0) {
+  if (g_server.insert("citation.book_works", "isbn, title, publisher", "'" +
+      isbn + "', '" + sql_ready(ttl) + "', '" + isbn_obj["items"][0][
+      "volumeInfo"]["publisher"].to_string() + "'", "update title = values("
+      "title), publisher = values(publisher)") < 0) {
     myerror += "\nError while inserting book data (" + isbn + "," + ttl + "," +
         isbn_obj["items"][0]["volumeInfo"]["publisher"].to_string() + "): '" +
-        server.error() + "'";
+        g_server.error() + "'";
     return false;
   }
   return true;
 }
 
-bool inserted_book_data_from_openlibrary(string isbn, MySQL::Server& server) {
+bool inserted_book_data_from_openlibrary(string isbn) {
   auto fn_isbn = g_config_data.tmpdir + "/cache/" + isbn + ".openlibrary.json";
   struct stat buf;
   if (stat(fn_isbn.c_str(), &buf) != 0) {
@@ -283,32 +274,32 @@ bool inserted_book_data_from_openlibrary(string isbn, MySQL::Server& server) {
       }
       lnam += sp[n];
     }
-    if (server.insert("citation.works_authors", ("id, id_type, last_name, "
+    if (g_server.insert("citation.works_authors", ("id, id_type, last_name, "
         "first_name, middle_name, sequence"), ("'" + isbn + "', 'ISBN', '" +
         sql_ready(lnam) + "', '" + sql_ready(fnam) + "', '" + sql_ready(mnam) +
         "', " + to_string(m)), "update id_type = values(id_type), sequence = "
         "values(sequence)") < 0) {
       myerror += "\nError while inserting author (" + isbn + ",ISBN," + lnam +
-          "," + fnam + "," + mnam + "): '" + server.error() + "' from Open "
+          "," + fnam + "," + mnam + "): '" + g_server.error() + "' from Open "
           "Library";
       return false;
     }
   }
   auto ttl = substitute(o["title"].to_string(), "\\", "\\\\");
-  if (server.insert("citation.book_works", "isbn, title, publisher", "'" + isbn
-      + "', '" + sql_ready(ttl) + "', '" + o["publishers"][0].to_string() +
+  if (g_server.insert("citation.book_works", "isbn, title, publisher", "'" +
+      isbn + "', '" + sql_ready(ttl) + "', '" + o["publishers"][0].to_string() +
       "'", "update title = values(title), publisher = values(publisher)") < 0) {
     myerror += "\nError while inserting book data (" + isbn + "," + ttl + "," +
-        o["publishers"][0].to_string() + "): '" + server.error() + "'";
+        o["publishers"][0].to_string() + "): '" + g_server.error() + "'";
     return false;
   }
   return true;
 }
 
-bool inserted_book_data(string isbn, MySQL::Server& server) {
-  auto b = inserted_book_data_from_google(isbn, server);
+bool inserted_book_data(string isbn) {
+  auto b = inserted_book_data_from_google(isbn);
   if (!b) {
-    b = inserted_book_data_from_openlibrary(isbn, server);
+    b = inserted_book_data_from_openlibrary(isbn);
   }
   return b;
 }
@@ -369,8 +360,7 @@ string cache_file(string doi) {
   return fnam;
 }
 
-bool filled_authors_from_cross_ref(string subj_doi, MySQL::Server& server,
-    JSON::Object& obj) {
+bool filled_authors_from_cross_ref(string subj_doi, JSON::Object& obj) {
   auto cfile = cache_file(subj_doi);
   if (!cfile.empty()) {
     ifstream ifs(cfile.c_str());
@@ -405,7 +395,7 @@ bool filled_authors_from_cross_ref(string subj_doi, MySQL::Server& server,
         } else {
           orcid = "'" + orcid + "'";
         }
-        if (server.insert("citation.works_authors", "id, id_type, last_name, "
+        if (g_server.insert("citation.works_authors", "id, id_type, last_name, "
             "first_name, middle_name, orcid_id, sequence", "'" + subj_doi +
             "', 'DOI', '" + sql_ready(family) + "', '" + sql_ready(fname) +
             "', '" + sql_ready( mname) + "', " + orcid + ", " + to_string(m),
@@ -414,7 +404,7 @@ bool filled_authors_from_cross_ref(string subj_doi, MySQL::Server& server,
             "sequence)") < 0) {
           append(myerror, "Error while inserting CrossRef author (" + subj_doi +
               ", DOI, " + family + ", " + fname + ", " + mname + "): '" +
-              server.error() + "'", "\n");
+              g_server.error() + "'", "\n");
           stringstream oss, ess;
           mysystem2("/bin/tcsh -c \"/bin/rm -f " + cfile + "\"", oss, ess);
           return false;
@@ -425,14 +415,14 @@ bool filled_authors_from_cross_ref(string subj_doi, MySQL::Server& server,
   return true;
 }
 
-bool filled_authors_from_scopus(string scopus_url, string API_KEY, string
-    subj_doi, MySQL::Server& server, JSON::Object& author_obj) {
+bool filled_authors_from_scopus(string scopus_url, string api_key, string
+    subj_doi, JSON::Object& author_obj) {
   auto sp = split(scopus_url, "/");
   auto scopus_id = sp.back();
   auto authfil = g_config_data.tmpdir + "/cache/scopus_id_" + scopus_id +
       ".elsevier.json";
   auto url = scopus_url + "?field=author,dc:publisher&httpAccept=application/"
-      "json&apiKey=" + API_KEY;
+      "json&apiKey=" + api_key;
   struct stat buf;
   if (stat(authfil.c_str(), &buf) != 0) {
     sleep_for(seconds(1));
@@ -485,14 +475,14 @@ bool filled_authors_from_scopus(string scopus_url, string API_KEY, string
           "author"][m]["@seq"].to_string();
       auto lnam = author_obj["abstracts-retrieval-response"]["authors"][
           "author"][m]["ce:surname"].to_string();
-      if (server.insert("citation.works_authors", "id, id_type, last_name, "
+      if (g_server.insert("citation.works_authors", "id, id_type, last_name, "
           "first_name, middle_name, sequence", "'" + subj_doi + "', 'DOI', '" +
           sql_ready(lnam) + "', '" + sql_ready(fnam) + "', '" + sql_ready(mnam)
           + "', " + seq, "update id_type = values(id_type), sequence = values("
           "sequence)") < 0) {
         append(myerror, "Error while inserting Scopus author (" + subj_doi +
             ", DOI, " + lnam + ", " + fnam + ", " + mnam + ", " + seq + "): '" +
-            server.error() + "'", "\n");
+            g_server.error() + "'", "\n");
         return false;
       }
     }
@@ -501,12 +491,12 @@ bool filled_authors_from_scopus(string scopus_url, string API_KEY, string
   return false;
 }
 
-void regenerate_dataset_descriptions(MySQL::Server& server, string whence) {
+void regenerate_dataset_descriptions(string whence) {
   MySQL::LocalQuery q("select v.dsid, count(c.new_flag) from citation."
       "data_citations as c left join (select distinct dsid, doi from dssdb."
       "dsvrsn) as v on v.doi = c.doi_data where c.new_flag = '1' group by v."
       "dsid");
-  if (q.submit(server) < 0) {
+  if (q.submit(g_server) < 0) {
     myerror += "\nError while obtaining list of new " + whence + " citations: '"
         + q.error() + "'";
     return;
@@ -523,20 +513,21 @@ void regenerate_dataset_descriptions(MySQL::Server& server, string whence) {
   }
 }
 
-void reset_new_flag(MySQL::Server& server) {
+void reset_new_flag() {
   string r;
-  if (server.command("update " + g_args.doi_group.db_data.insert_table + " set "
-      "new_flag = '0' where new_flag = '1'", r) < 0) {
+  if (g_server.command("update " + g_args.doi_group.db_data.insert_table +
+      " set new_flag = '0' where new_flag = '1'", r) < 0) {
     myerror += "\nError updating 'new_flag' in " + g_args.doi_group.db_data.
-        insert_table + ": " + server.error();
+        insert_table + ": " + g_server.error();
     return;
   }
 }
 
-size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
-    doi_tuple, string& try_error) {
+size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA&
+    service_data, string& try_error) {
+  static const string API_URL = get<2>(service_data);
   string doi, publisher, asset_type;
-  tie(doi, publisher, asset_type) = doi_tuple;
+  tie(doi, publisher, asset_type) = doi_data;
   size_t ntries = 0;
   while (ntries < 3) {
     sleep_for(seconds(ntries * 5));
@@ -544,23 +535,21 @@ size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
     auto filename = doi;
     replace_all(filename, "/", "@@");
     filename = g_config_data.tmpdir + "/" + filename + ".crossref.json";
-    string url = "https://api.eventdata.crossref.org/v1/events?source=crossref&"
-        "obj-id=" + doi;
+    string url = API_URL + "?source=crossref&obj-id=" + doi;
     JSON::Object doi_obj;
-    get_citations(url, "CrossRef", 3, filename, doi_obj);
+    get_citations(url, get<0>(service_data), 3, filename, doi_obj);
     if (!doi_obj) {
       try_error += "\nServer response was not a JSON object\n/bin/tcsh -c \""
-          "curl -o " + filename + " 'https://api.eventdata.crossref.org/v1/"
-          "events?source=crossref&obj-id=" + doi + "'\"";
+          "curl -o " + filename + " '" + API_URL + "?source=crossref&obj-id=" +
+          doi + "'\"";
       stringstream oss, ess;
       mysystem2("/bin/tcsh -c \"/bin/rm -f " + filename + "\"", oss, ess);
       continue;
     }
     if (doi_obj["status"].to_string() != "ok") {
       try_error += "\nServer failure: '" + doi_obj["message"].to_string() +
-          "'\n/bin/tcsh -c \"curl -o " + filename + " 'https://"
-          "api.eventdata.crossref.org/v1/events?source=crossref&obj-id=" +
-          doi + "'\"";
+          "'\n/bin/tcsh -c \"curl -o " + filename + " '" + API_URL + "?source="
+          "crossref&obj-id=" + doi + "'\"";
       stringstream oss, ess;
       mysystem2("/bin/tcsh -c \"/bin/rm -f " + filename + "\"", oss, ess);
       continue;
@@ -572,25 +561,25 @@ size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
       replace_all(sid, "\\/", "/");
       auto sp = split(sid, "doi.org/");
       auto sdoi = sp.back();
-      if (server.insert(g_args.doi_group.db_data.insert_table, "doi_data, "
+      if (g_server.insert(g_args.doi_group.db_data.insert_table, "doi_data, "
           "doi_work, new_flag", "'" + doi + "', '" + sdoi + "', '1'", "update "
           "doi_data = values(doi_data)") < 0) {
         append(myerror, "Error while inserting CrossRef DOIs (" + doi + ", " +
-            sdoi + "): '" + server.error() + "'", "\n");
+            sdoi + "): '" + g_server.error() + "'", "\n");
         continue;
       }
-      if (server.insert("citation.sources", "doi_work, doi_data, source", "'" +
-          sdoi + "', '" + doi + "', 'CrossRef'", "update source = source") <
-          0) {
+      if (g_server.insert("citation.sources", "doi_work, doi_data, source", "'"
+          + sdoi + "', '" + doi + "', '" + get<0>(service_data) + "'", "update "
+          "source = source") < 0) {
         append(myerror, "Error updating CrossRef source for '" + sdoi + "', '" +
             doi + "'", "\n");
       }
-      if (server.insert("citation.doi_data", "doi_data, publisher, asset_type",
-          "'" + doi + "', '" + sql_ready(publisher) + "', '" + asset_type + "'",
-          "update publisher = values(publisher), asset_type = values("
-          "asset_type)") < 0) {
+      if (g_server.insert("citation.doi_data", "doi_data, publisher, "
+          "asset_type", "'" + doi + "', '" + sql_ready(publisher) + "', '" +
+          asset_type + "'", "update publisher = values(publisher), asset_type "
+          "= values(asset_type)") < 0) {
         append(myerror, "Error updating CrossRef DOI data (" + doi + ", " +
-            publisher + ", " + asset_type + "): '" + server.error() + "'",
+            publisher + ", " + asset_type + "): '" + g_server.error() + "'",
             "\n");
         continue;
       }
@@ -600,7 +589,7 @@ size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
 
       // add the author data for the citing "work"
       JSON::Object sdoi_obj;
-      if (!filled_authors_from_cross_ref(sdoi, server, sdoi_obj)) {
+      if (!filled_authors_from_cross_ref(sdoi, sdoi_obj)) {
         continue;
       }
 
@@ -620,7 +609,7 @@ size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
         if (!iss.empty()) {
             vol += "(" + iss + ")";
         }
-        if (server.insert("citation.journal_works",
+        if (g_server.insert("citation.journal_works",
                           "doi, pub_name, volume, pages",
                           "'" + sdoi + "', '" + sql_ready(pubnam) + "', '" +
             vol + "', '" + e["page"].to_string() + "'",
@@ -628,7 +617,7 @@ size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
             "volume), pages = values(pages)") < 0) {
           myerror += "\nError while inserting CrossRef journal data (" + sdoi +
               "," + pubnam + "," + sdoi_obj["message"]["volume"].to_string() +
-              "," + sdoi_obj["message"]["page"].to_string() + "): '" + server.
+              "," + sdoi_obj["message"]["page"].to_string() + "): '" + g_server.
               error() + "'";
         }
       } else if (typ == "book-chapter") {
@@ -639,16 +628,16 @@ size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
               sdoi + ")";
           continue;
         }
-        if (server.insert("citation.book_chapter_works", ("doi, pages, isbn"),
+        if (g_server.insert("citation.book_chapter_works", ("doi, pages, isbn"),
             ("'" + sdoi + "', '" + sdoi_obj["message"]["page"].to_string() +
             "', '" + isbn + "'"), "update pages = values(pages), isbn = values("
             "isbn)") < 0) {
           myerror += "\nError while inserting book chapter data (" + sdoi + ","
               + sdoi_obj["message"]["pages"].to_string() + "," + isbn + "): '" +
-              server.error() + "'";
+              g_server.error() + "'";
           continue;
         }
-        if (!inserted_book_data(isbn, server)) {
+        if (!inserted_book_data(isbn)) {
           myerror += "\nError inserting ISBN '" + isbn + "' from CrossRef";
           continue;
         }
@@ -661,13 +650,13 @@ size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
           pubnam = substitute(sdoi_obj["message"]["short-container-title"][0]
             .to_string(), "\\", "\\\\");
         }
-        if (server.insert("citation.proceedings_works",
+        if (g_server.insert("citation.proceedings_works",
                           "doi, pub_name, volume, pages",
                           "'" + sdoi + "', '" + sql_ready(pubnam) + "', '', "
             "''",
                           "update pub_name = values(pub_name)") < 0) {
           myerror += "\nError while inserting CrossRef proceedings data (" +
-              sdoi + ", " + pubnam + ", '', ''): '" + server.error() + "'";
+              sdoi + ", " + pubnam + ", '', ''): '" + g_server.error() + "'";
           continue;
         }
       } else {
@@ -691,13 +680,13 @@ size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
       }
       auto ttl = repair_string(sdoi_obj["message"]["title"][0].to_string());
       auto publisher = sdoi_obj["message"]["publisher"].to_string();
-      if (server.insert("citation.works", "doi, title, pub_year, type, "
+      if (g_server.insert("citation.works", "doi, title, pub_year, type, "
           "publisher", "'" + sdoi + "', '" + sql_ready(ttl) + "', '" + pubyr +
           "', '" + typ + "', '" + sql_ready(publisher) + "'", "update title = "
           "values(title), pub_year = values(pub_year), type = values(type), "
           "publisher = values(publisher)") < 0) {
         myerror += "\nError while CrossRef inserting work (" + sdoi + "," + ttl
-            + "," + pubyr + "," + typ + "," + publisher + "): '" + server.
+            + "," + pubyr + "," + typ + "," + publisher + "): '" + g_server.
             error() + "'";
         continue;
       }
@@ -708,28 +697,25 @@ size_t try_crossref(MySQL::Server& server, const tuple<string, string, string>&
   return ntries;
 }
 
-void query_crossref(vector<tuple<string, string, string>>& doi_list, MySQL::
-    Server& server) {
-  g_output << "Querying CrossRef ..." << endl;
+void query_crossref(const DOI_LIST& doi_list, const SERVICE_DATA&
+    service_data) {
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
     tie(doi, publisher, asset_type) = e;
     g_output << "    querying DOI '" << doi << "' (" << publisher << ", " <<
         asset_type << ") ..." << endl;
     string try_error;
-    auto ntries = try_crossref(server, e, try_error);
+    auto ntries = try_crossref(e, service_data, try_error);
     if (ntries == 3) {
-      myerror += "\nError reading CrossRef JSON for DOI '" + doi + "': '" +
-          try_error + "'\n/bin/tcsh -c \"curl 'https://"
-          "api.eventdata.crossref.org/v1/events?source=crossref&obj-id=" + doi +
-          "'\"";
+      append(myerror, "Error reading CrossRef JSON for DOI '" + doi + "': '" +
+          try_error + "'\n/bin/tcsh -c \"curl '" + get<2>(service_data) +
+          "?source=crossref&obj-id=" + doi + "'\"", "\n");
     }
   }
   if (g_args.doi_group.id == "rda") {
-    regenerate_dataset_descriptions(server, "CrossRef");
+    regenerate_dataset_descriptions(get<0>(service_data));
   }
-  reset_new_flag(server);
-  g_output << "... done querying CrossRef." << endl;
+  reset_new_flag();
 }
 
 string publisher_from_cross_ref(string subj_doi) {
@@ -755,10 +741,8 @@ string publisher_from_cross_ref(string subj_doi) {
   return "";
 }
 
-void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
-    Server& server) {
-  g_output << "Querying Elsevier ..." << endl;
-  const string API_KEY = g_config_data.api_keys["elsevier"];
+void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
+    service_data) {
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
     tie(doi, publisher, asset_type) = e;
@@ -771,16 +755,16 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
       replace_all(filename, "/", "@@");
       filename = g_config_data.tmpdir + "/" + filename + ".elsevier." +
           to_string(pgnum) + ".json";
-      string url = "https://api.elsevier.com/content/search/scopus?start=" +
-          to_string(pgnum) + "&query=ALL:" + doi + "&field=prism:doi,prism:url,"
-          "prism:publicationName,prism:coverDate,prism:volume,prism:pageRange,"
-          "prism:aggregationType,prism:isbn,dc:title&httpAccept=application/"
-          "json&apiKey=" + API_KEY;
+      string url = get<2>(service_data) + "?start=" + to_string(pgnum) +
+          "&query=ALL:" + doi + "&field=prism:doi,prism:url,prism:"
+          "publicationName,prism:coverDate,prism:volume,prism:pageRange,prism:"
+          "aggregationType,prism:isbn,dc:title&httpAccept=application/json&"
+          "apiKey=" + get<3>(service_data);
       JSON::Object doi_obj;
       size_t num_tries = 0;
       for (; num_tries < 3; ++num_tries) {
         sleep_for(seconds(num_tries * 5));
-        get_citations(url, "Elsevier", 1, filename, doi_obj);
+        get_citations(url, get<0>(service_data), 1, filename, doi_obj);
         if (doi_obj && doi_obj["service-error"].type() == JSON::ValueType::
             Nonexistent) {
           break;
@@ -824,25 +808,25 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
         auto sdoi = doi_obj["search-results"]["entry"][n]["prism:doi"].
             to_string();
         replace_all(sdoi, "\\/","/");
-        if (server.insert(g_args.doi_group.db_data.insert_table, "doi_data, "
+        if (g_server.insert(g_args.doi_group.db_data.insert_table, "doi_data, "
             "doi_work, new_flag", "'" + doi + "', '" + sdoi + "', '1'",
             "update doi_data = values(doi_data)") < 0) {
           append(myerror, "Error while inserting Elsevier DOIs (" + doi + ", " +
-              sdoi + "): '" + server.error() + "'", "\n");
+              sdoi + "): '" + g_server.error() + "'", "\n");
           continue;
         }
-        if (server.insert("citation.sources", "doi_work, doi_data, source",
-            "'" + sdoi + "', '" + doi + "', 'Scopus'", "update source = source")
-            < 0) {
+        if (g_server.insert("citation.sources", "doi_work, doi_data, source",
+            "'" + sdoi + "', '" + doi + "', '" + get<0>(service_data) + "'",
+            "update source = source") < 0) {
           append(myerror, "Error updating Scopus source for '" + sdoi + "', '" +
               doi + "'", "\n");
         }
-        if (server.insert("citation.doi_data", "doi_data, publisher, "
+        if (g_server.insert("citation.doi_data", "doi_data, publisher, "
             "asset_type", "'" + doi + "', '" + sql_ready(publisher) + "', '" +
             asset_type + "'", "update publisher = values(publisher), "
             "asset_type = values(asset_type)") < 0) {
           append(myerror, "Error updating Elsevier DOI data (" + doi + ", " +
-              publisher + ", " + asset_type + "): '" + server.error() + "'",
+              publisher + ", " + asset_type + "): '" + g_server.error() + "'",
               "\n");
           continue;
         }
@@ -859,10 +843,10 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
         }
         auto scopus_url = prism_url.to_string();
         JSON::Object author_obj;
-        if (!filled_authors_from_scopus(scopus_url, API_KEY, sdoi, server,
+        if (!filled_authors_from_scopus(scopus_url, get<3>(service_data), sdoi,
             author_obj)) {
           JSON::Object cr_obj;
-          filled_authors_from_cross_ref(sdoi, server, cr_obj);
+          filled_authors_from_cross_ref(sdoi, cr_obj);
         }
 
         // get the type of the "work" and add type-specific data
@@ -872,10 +856,10 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
           typ = "J";
           auto pubnam = doi_obj["search-results"]["entry"][n][
               "prism:publicationName"].to_string();
-          if (server.insert("citation.journal_works", "doi, pub_name, volume, "
-              "pages", "'" + sdoi + "', '" + sql_ready(pubnam) + "', '" +
-              doi_obj["search-results"]["entry"][n]["prism:volume"].to_string()
-              + "', '" + doi_obj["search-results"]["entry"][n][
+          if (g_server.insert("citation.journal_works", "doi, pub_name, "
+              "volume, pages", "'" + sdoi + "', '" + sql_ready(pubnam) + "', '"
+              + doi_obj["search-results"]["entry"][n]["prism:volume"].
+              to_string() + "', '" + doi_obj["search-results"]["entry"][n][
               "prism:pageRange"].to_string() + "'", "update pub_name = values("
               "pub_name), volume = values(volume), pages = values(pages)") <
               0) {
@@ -883,8 +867,8 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
                 sdoi + "', '" + sql_ready(pubnam) + "', '" + doi_obj[
                 "search-results"]["entry"][n]["prism:volume"].to_string() +
                 "', '" + doi_obj["search-results"]["entry"][n][
-                "prism:pageRange"].to_string() + "'): '" + server.error() + "'",
-                "\n");
+                "prism:pageRange"].to_string() + "'): '" + g_server.error() +
+                "'", "\n");
             continue;
           }
         } else if (typ == "Book" || typ == "Book Series") {
@@ -896,23 +880,23 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
                 + sdoi + ")";
             continue;
           }
-          if (server.insert("citation.book_chapter_works", ("doi, pages, isbn"),
-              ("'" + sdoi + "', '" + doi_obj["search-results"]["entry"][n][
-              "prism:pageRange"].to_string() + "', '" + isbn + "'"), "update "
-              "pages = values(pages), isbn = values(isbn)") < 0) {
+          if (g_server.insert("citation.book_chapter_works", ("doi, pages, "
+              "isbn"), ("'" + sdoi + "', '" + doi_obj["search-results"][
+              "entry"][n]["prism:pageRange"].to_string() + "', '" + isbn + "'"),
+              "update pages = values(pages), isbn = values(isbn)") < 0) {
             myerror += "\nError while inserting book chapter data (" + sdoi +
                 ", " + doi_obj["search-results"]["entry"][n]["prism:pageRange"].
-                to_string() + ", " + isbn + "): '" + server.error() + "'";
+                to_string() + ", " + isbn + "): '" + g_server.error() + "'";
             continue;
           }
-          if (!inserted_book_data(isbn,server)) {
+          if (!inserted_book_data(isbn)) {
             myerror += "\nError inserting ISBN '" + isbn + "' from Elsevier";
             continue;
           }
         } else if (typ == "Conference Proceeding") {
           typ = "P";
           auto& e = doi_obj["search-results"]["entry"][n];
-          if (server.insert("citation.proceedings_works",
+          if (g_server.insert("citation.proceedings_works",
                             "doi, pub_name, volume, pages",
                             "'" + sdoi + "', '" + e["prism:publicationName"].
               to_string() + "', '" + e["prism:volume"].to_string() + "', '" +e[
@@ -923,7 +907,7 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
                 sdoi + ", " + doi_obj["search-results"]["entry"][n][
                 "prism:publicationName"].to_string() + ", " + doi_obj[
                 "search-results"]["entry"][n]["prism:pageRange"].to_string() +
-                "): '" + server.error() + "'";
+                "): '" + g_server.error() + "'";
             continue;
           }
         } else {
@@ -955,14 +939,14 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
               }
             }
           }
-          if (server.insert("citation.works", "doi, title, pub_year, type, "
+          if (g_server.insert("citation.works", "doi, title, pub_year, type, "
               "publisher", "'" + sdoi + "', '" + sql_ready(ttl) + "', '" +
               pubyr + "', '" + typ + "', '" + sql_ready(publisher) + "'",
               "update title = values(title), pub_year = values(pub_year), type "
               "= values(type), publisher = values(publisher)") < 0) {
             myerror += "\nError while Elsevier inserting work (" + sdoi + ", " +
                 ttl + ", " + pubyr + ", " + typ + ", " + publisher + ") from "
-                "file '" + filename + "': '" + server.error() + "'";
+                "file '" + filename + "': '" + g_server.error() + "'";
             continue;
           }
         } else {
@@ -973,10 +957,9 @@ void query_elsevier(vector<tuple<string, string, string>>& doi_list, MySQL::
     }
   }
   if (g_args.doi_group.id == "rda") {
-    regenerate_dataset_descriptions(server, "Elsevier");
+    regenerate_dataset_descriptions(get<0>(service_data));
   }
-  reset_new_flag(server);
-  g_output << "... done querying Elsevier." << endl;
+  reset_new_flag();
 }
 
 tuple<string, string> parse_author_first_name(string fname) {
@@ -992,8 +975,7 @@ tuple<string, string> parse_author_first_name(string fname) {
   return std::move(t);
 }
 
-void fill_authors_from_wos(string doi_work, MySQL::Server& server, const JSON::
-    Value& v) {
+void fill_authors_from_wos(string doi_work, const JSON::Value& v) {
   vector<tuple<string, string, string, string, size_t>> author_names;
   if (v.type() == JSON::ValueType::Array) {
     for (size_t n = 0; n < v.size(); ++n) {
@@ -1037,7 +1019,7 @@ void fill_authors_from_wos(string doi_work, MySQL::Server& server, const JSON::
     }
   }
   for (const auto& name : author_names) {
-    if (server.insert("citation.works_authors", "id, id_type, last_name, "
+    if (g_server.insert("citation.works_authors", "id, id_type, last_name, "
         "first_name, middle_name, orcid_id, sequence", "'" + doi_work + "', "
         "'DOI', '" + sql_ready(get<2>(name)) + "', '" + sql_ready(get<0>(name))
         + "', '" + sql_ready(get<1>(name)) + "', '" + get<3>(name) + "', " +
@@ -1046,25 +1028,24 @@ void fill_authors_from_wos(string doi_work, MySQL::Server& server, const JSON::
       append(myerror, "Error while inserting WoS author (DOI " + doi_work +
           ", '" + get<2>(name) + "', '" + get<0>(name) + "', '" + get<1>(name) +
           "', '" + get<3>(name) + "', " + to_string(get<4>(name)) + "): '" +
-          server.error() + "'", "\n");
+          g_server.error() + "'", "\n");
     }
   }
 }
 
-void query_wos(vector<tuple<string, string, string>>& doi_list, MySQL::Server&
-    server) {
+void query_wos(const DOI_LIST& doi_list, const SERVICE_DATA& service_data) {
 return;
-  g_output << "Querying WoS ..." << endl;
-  string api_key_header = "X-ApiKey: " + g_config_data.api_keys["wos"];
+  static const string API_URL = get<2>(service_data);
+  static const string API_KEY_HEADER = "X-ApiKey: " + get<3>(service_data);
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
     tie(doi, publisher, asset_type) = e;
 
     // get the WoS ID for the DOI
     stringstream oss, ess;
-    if (mysystem2("/bin/tcsh -c \"curl -H '" + api_key_header + "' 'https://"
-        "wos-api.clarivate.com/api/wos/?databaseId=DCI&usrQuery=DO=" + doi +
-        "&count=1&firstRecord=1&viewField=none'\"", oss, ess) < 0) {
+    if (mysystem2("/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL
+        + "/?databaseId=DCI&usrQuery=DO=" + doi + "&count=1&firstRecord=1&"
+        "viewField=none'\"", oss, ess) < 0) {
       append(myerror, "Error getting WoS ID for DOI '" + doi + "'", "\n");
       continue;
     }
@@ -1081,10 +1062,10 @@ return;
     auto first_rec = 1;
     auto num_records = 2;
     while (first_rec < num_records) {
-      if (mysystem2("/bin/tcsh -c \"curl -H '" + api_key_header + "' 'https://"
-          "wos-api.clarivate.com/api/wos/citing?databaseId=WOS&uniqueId=" +
-          wos_id + "&count=100&firstRecord=" + to_string(first_rec) +
-          "&viewField='\"", oss, ess) < 0) {
+      if (mysystem2("/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" +
+          API_URL + "/citing?databaseId=WOS&uniqueId=" + wos_id + "&count=100&"
+          "firstRecord=" + to_string(first_rec) + "&viewField='\"", oss, ess) <
+          0) {
         append(myerror, "Error getting WoS citation IDs for DOI '" + doi + "'",
             "\n");
         continue;
@@ -1106,10 +1087,10 @@ return;
       auto cache_fn = g_config_data.tmpdir + "/cache/" + work_id + ".json";
       struct stat buf;
       if (stat(cache_fn.c_str(), &buf) != 0) {
-        if (mysystem2("/bin/tcsh -c \"curl -H '" + api_key_header + "' -s -o " +
-            cache_fn + " 'https://wos-api.clarivate.com/api/wos/id/" + work_id +
-            "?databaseId=WOS&count=1&firstRecord=1&viewField=" + view_field +
-            "'\"", oss, ess) < 0) {
+        if (mysystem2("/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' -s -o " +
+            cache_fn + " '" + API_URL + "/id/" + work_id + "?databaseId=WOS&"
+            "count=1&firstRecord=1&viewField=" + view_field + "'\"", oss, ess) <
+            0) {
           append(myerror, "Error get WoS work data for ID '" + work_id + "' "
               "(DOI " + doi + ")", "\n");
           continue;
@@ -1137,24 +1118,25 @@ return;
             doi + ")", "\n");
         continue;
       }
-      if (server.insert(g_args.doi_group.db_data.insert_table, "doi_data, "
+      if (g_server.insert(g_args.doi_group.db_data.insert_table, "doi_data, "
           "doi_work, new_flag", "'" + doi + "', '" + doi_work + "', '1'",
             "update doi_data = values(doi_data)") < 0) {
         append(myerror, "Error while inserting WoS DOIs (" + doi + ", " +
-            doi_work + "): '" + server.error() + "'", "\n");
+            doi_work + "): '" + g_server.error() + "'", "\n");
         continue;
       }
-      if (server.insert("citation.sources", "doi_work, doi_data, source", "'" +
-          doi_work + "', '" + doi + "', 'WoS'", "update source = source") < 0) {
+      if (g_server.insert("citation.sources", "doi_work, doi_data, source", "'"
+          + doi_work + "', '" + doi + "', '" + get<0>(service_data) + "'",
+          "update source = source") < 0) {
         append(myerror, "Error updating WoS source for '" + doi_work + "', '" +
             doi + "'", "\n");
       }
-      if (server.insert("citation.doi_data", "doi_data, publisher, asset_type",
-          "'" + doi + "', '" + sql_ready(publisher) + "', '" + asset_type + "'",
-          "update publisher = values(publisher), asset_type = values("
-          "asset_type)") < 0) {
+      if (g_server.insert("citation.doi_data", "doi_data, publisher, "
+          "asset_type", "'" + doi + "', '" + sql_ready(publisher) + "', '" +
+          asset_type + "'", "update publisher = values(publisher), asset_type "
+          "= values(asset_type)") < 0) {
         append(myerror, "Error updating Elsevier DOI data (" + doi + ", " +
-            publisher + ", " + asset_type + "): '" + server.error() + "'",
+            publisher + ", " + asset_type + "): '" + g_server.error() + "'",
             "\n");
         continue;
       }
@@ -1165,7 +1147,7 @@ return;
       // add author data for the citing "work"
       auto& address_names = record["static_data"]["fullrecord_metadata"][
           "addresses"]["address_name"];
-      fill_authors_from_wos(doi_work, server, address_names);
+      fill_authors_from_wos(doi_work, address_names);
 
       // get the type of the "work" and add type-specific data
       auto& summary = record["static_data"]["summary"];
@@ -1194,7 +1176,7 @@ return;
         if (!issue.empty()) {
           vol += "(" + issue + ")";
         }
-        if (server.insert("citation.journal_works",
+        if (g_server.insert("citation.journal_works",
                           "doi, pub_name, volume, pages",
                           "'" + doi_work + "', '" + sql_ready(pubnam) + "', '" +
             vol + "', '" + pub_info["page"]["content"].to_string() + "'",
@@ -1202,7 +1184,7 @@ return;
             "volume), pages = values(pages)") < 0) {
           append(myerror, "Error while inserting WoS journal data ('" + doi_work
               + "', '" + sql_ready(pubnam) + "', '" + vol + "', '" + pub_info[
-              "page"]["content"].to_string() + "'): '" + server.error() + "'",
+              "page"]["content"].to_string() + "'): '" + g_server.error() + "'",
               "\n");
           continue;
         }
@@ -1229,14 +1211,15 @@ return;
           append(myerror, "**NO WoS PUBLISHER (" + work_id + ")", "\n");
           continue;
         }
-        if (server.insert("citation.works", "doi, title, pub_year, type, "
+        if (g_server.insert("citation.works", "doi, title, pub_year, type, "
             "publisher", "'" + doi_work + "', '" + sql_ready(item_title) +
             "', '" + pubyr + "', '" + pubtype + "', '" + sql_ready(publisher) +
             "'", "update title = values(title), pub_year = values(pub_year), "
             "type = values(type), publisher = values(publisher)") < 0) {
           append(myerror, "Error while WoS inserting work (" + doi_work + ", " +
                 item_title + ", " + pubyr + ", " + pubtype + ", " + publisher +
-                ") from WoS '" + work_id + "': '" + server.error() + "'", "\n");
+                ") from WoS '" + work_id + "': '" + g_server.error() + "'",
+                "\n");
             continue;
           }
       } else {
@@ -1245,10 +1228,9 @@ return;
     }
   }
   if (g_args.doi_group.id == "rda") {
-    regenerate_dataset_descriptions(server, "WoS");
+    regenerate_dataset_descriptions(get<0>(service_data));
   }
-  reset_new_flag(server);
-  g_output << "... done querying WoS." << endl;
+  reset_new_flag();
 }
 
 void assert_configuration_value(string value_name, const JSON::Value& value,
@@ -1286,10 +1268,6 @@ void read_config() {
   g_output.open(g_config_data.tmpdir + "/output." + dateutils::
       current_date_time().to_string("%Y%m%d%H%MM"));
   g_output << "Configuration file open and ready to parse ..." << endl;
-  auto& api_keys = o["api-keys"];
-  for (const auto& key : api_keys.keys()) {
-    g_config_data.api_keys.emplace(key, api_keys[key].to_string());
-  }
   auto& doi_groups = o["doi-groups"];
   for (size_t n = 0; n < doi_groups.size(); ++n) {
     auto& a = doi_groups[n];
@@ -1348,6 +1326,15 @@ void read_config() {
       }
     }
   }
+  auto& services = o["services"];
+  for (size_t n = 0; n < services.size(); ++n) {
+    auto id = services[n]["id"].to_string();
+    if (!id.empty()) {
+      g_services.emplace(id, make_tuple(services[n]["name"].to_string(),
+          services[n]["title"].to_string(), services[n]["url"].to_string(),
+          services[n]["api-key"].to_string(), true));
+    }
+  }
   g_output << "... configuration file parsed." << endl;
 }
 
@@ -1366,21 +1353,29 @@ void show_usage_and_exit() {
   cerr << "\nrequired:" << endl;
   cerr << "DOI_GROUP  doi group for which to get citation statistics" << endl;
   cerr << "\noptions:" << endl;
-  cerr << "-d DOI_DATA   get citation data for a single DOI only (don't build "
-      "a list)" << endl;
-  cerr << "              DOI_DATA is a delimited list (see -s) containing "
-      "three items:" << endl;
-  cerr << "                 - the DOI" << endl;
-  cerr << "                 - the publisher of the DOI" << endl;
-  cerr << "                 - the asset type (e.g. dataset, software, etc.)" <<
-      endl;
-  cerr << "-k            keep the json files from the APIs (default is to "
-      "remove them)" << endl;
-  cerr << "--no-works    don't collect information about citing works" << endl;
-  cerr << "-S SERVICE    don't query citation SERVICE" << endl;
-  cerr << "-s DELIMITER  delimiter string for DOI_DATA, otherwise a semicolon "
-      "is the" << endl;
-  cerr << "                 default" << endl;
+  cerr << "  -d DOI_DATA                get citation data for a single DOI "
+      "only (don't" << endl;
+  cerr << "                               build a list)" << endl;
+  cerr << "                             DOI_DATA is a delimited list (see -s) "
+      "containing" << endl;
+  cerr << "                               three items:" << endl;
+  cerr << "                               - the DOI" << endl;
+  cerr << "                               - the publisher of the DOI" << endl;
+  cerr << "                               - the asset type (e.g. dataset, "
+      "software, etc.)" << endl;
+  cerr << "  -k                         keep the json files from the APIs ("
+      "default is to" << endl;
+  cerr << "                               remove them)" << endl;
+  cerr << "  --no-works                 don't collect information about citing "
+      "works" << endl;
+  cerr << "  --only-services SERVICES   comma-delimited list of services to "
+      "query (any not" << endl;
+  cerr << "                               specified will be ignored)" << endl;
+  cerr << "  --no-services SERVICES     comma-delimited list of services to "
+      "ignore" << endl;
+  cerr << "  -s DELIMITER               delimiter string for DOI_DATA, "
+      "otherwise a" << endl;
+  cerr << "                               semicolon is the default" << endl;
   g_args.clean_tmpdir = false;
   exit(1);
 }
@@ -1439,8 +1434,23 @@ void parse_args(int argc, char **argv) {
       g_args.clean_tmpdir = false;
     } else if (arg == "--no-works") {
       g_args.no_works = true;
-    } else if (arg == "-S") {
-      g_services.erase(argv[++n]);
+    } else if (arg == "--only-services") {
+      auto sp = split(argv[++n], ",");
+      for (auto& e : g_services) {
+        get<4>(e.second) = false;
+      }
+      for (const auto& e : sp) {
+        if (g_services.find(e) != g_services.end()) {
+          get<4>(g_services[e]) = true;
+        }
+      }
+    } else if (arg == "--no-services") {
+      auto sp = split(argv[++n], ",");
+      for (const auto& e : sp) {
+        if (g_services.find(e) != g_services.end()) {
+          get<4>(g_services[e]) = false;
+        }
+      }
     } else if (arg == "-s") {
       doi_data_delimiter = argv[++n];
     }
@@ -1460,28 +1470,28 @@ void parse_args(int argc, char **argv) {
   }
 }
 
-void connect_to_database(MySQL::Server& server) {
-  server.connect("rda-db.ucar.edu", "metadata", "metadata", "");
-  if (!server) {
+void connect_to_database() {
+  g_server.connect("rda-db.ucar.edu", "metadata", "metadata", "");
+  if (!g_server) {
     add_to_error_and_exit("unable to connect to the database");
   }
 }
 
-void create_doi_table(MySQL::Server& server) {
-  if (!MySQL::table_exists(server, g_args.doi_group.db_data.insert_table)) {
+void create_doi_table() {
+  if (!MySQL::table_exists(g_server, g_args.doi_group.db_data.insert_table)) {
     string res;
-    if (server.command("create table " + g_args.doi_group.db_data.insert_table +
-        " like citation.template_data_citations", res) < 0) {
+    if (g_server.command("create table " + g_args.doi_group.db_data.insert_table
+        + " like citation.template_data_citations", res) < 0) {
       add_to_error_and_exit("unable to create citation table '" + g_args.
-          doi_group.db_data.insert_table + "'; error: '" + server.error() +
+          doi_group.db_data.insert_table + "'; error: '" + g_server.error() +
           "'");
     }
   }
 }
 
-void fill_journal_abbreviations(MySQL::Server& server) {
+void fill_journal_abbreviations() {
   MySQL::LocalQuery q("*", "citation.journal_abbreviations");
-  if (q.submit(server) < 0) {
+  if (q.submit(g_server) < 0) {
     add_to_error_and_exit("unable to get journal abbreviatons: '" + q.error() +
         "'");
   }
@@ -1490,9 +1500,9 @@ void fill_journal_abbreviations(MySQL::Server& server) {
   }
 }
 
-void fill_journals_no_abbreviation(MySQL::Server& server) {
+void fill_journals_no_abbreviation() {
   MySQL::LocalQuery q("*", "citation.journal_no_abbreviation");
-  if (q.submit(server) < 0) {
+  if (q.submit(g_server) < 0) {
     add_to_error_and_exit("unable to get journals with no abbrevations: '" + q.
         error() + "'");
   }
@@ -1501,9 +1511,9 @@ void fill_journals_no_abbreviation(MySQL::Server& server) {
   }
 }
 
-void fill_publisher_fixups(MySQL::Server& server) {
+void fill_publisher_fixups() {
   MySQL::LocalQuery q("*", "citation.publisher_fixups");
-  if (q.submit(server) < 0) {
+  if (q.submit(g_server) < 0) {
     add_to_error_and_exit("unable to get publisher fixups: '" + q.error() +
         "'");
   }
@@ -1512,7 +1522,7 @@ void fill_publisher_fixups(MySQL::Server& server) {
   }
 }
 
-void fill_doi_list_from_db(vector<tuple<string, string, string>>& doi_list) {
+void fill_doi_list_from_db(DOI_LIST& doi_list) {
   g_output << "    filling list from a database ..." << endl;
   MySQL::Server srv(g_args.doi_group.db_data.host, g_args.doi_group.db_data.
       username, g_args.doi_group.db_data.password, "");
@@ -1529,6 +1539,7 @@ void fill_doi_list_from_db(vector<tuple<string, string, string>>& doi_list) {
     doi_list.emplace_back(make_tuple(r[0], g_args.doi_group.publisher,
         g_config_data.default_asset_type));
   }
+  srv.disconnect();
   g_output << "    ... found " << doi_list.size() << " DOIs." << endl;
 }
 
@@ -1556,7 +1567,7 @@ void process_json_value(const JSON::Value& v, deque<string> sp, vector<string>&
   }
 }
 
-void fill_doi_list_from_api(vector<tuple<string, string, string>>& doi_list) {
+void fill_doi_list_from_api(DOI_LIST& doi_list) {
   if (g_args.doi_group.api_data.response.doi_path.empty()) {
     add_to_error_and_exit("not configured to handle an API response");
   }
@@ -1627,7 +1638,7 @@ void fill_doi_list_from_api(vector<tuple<string, string, string>>& doi_list) {
   g_output << "    ... found " << doi_list.size() << " DOIs." << endl;
 }
 
-void fill_doi_list(vector<tuple<string, string, string>>& doi_list) {
+void fill_doi_list(DOI_LIST& doi_list) {
   g_output << "Filling list of DOIs for '" << g_args.doi_group.id << "' ..." <<
       endl;
   if (!g_single_doi.empty()) {
@@ -1644,9 +1655,24 @@ void fill_doi_list(vector<tuple<string, string, string>>& doi_list) {
   g_output << "... done filling DOI list." << endl;
 }
 
-void print_publisher_list(MySQL::Server& server) {
+void query_service(string service_id, const SERVICE_DATA& service_data, const
+    DOI_LIST& doi_list) {
+  g_output << "Querying " << get<0>(service_data) << " ..." << endl;
+  if (service_id == "crossref") {
+    query_crossref(doi_list, service_data);
+  } else if (service_id == "elsevier") {
+    query_elsevier(doi_list, service_data);
+  } else if (service_id == "wos") {
+    query_wos(doi_list, service_data);
+  } else {
+    append(myerror, "ignoring unknown service '" + service_id + "'", "\n");
+  }
+  g_output << "... done querying " << get<0>(service_data) << "." << endl;
+}
+
+void print_publisher_list() {
   MySQL::LocalQuery q("distinct publisher", "citation.works");
-  if (q.submit(server) < 0) {
+  if (q.submit(g_server) < 0) {
     add_to_error_and_exit("unable to get list of pubishers from 'works' table: "
         "'" + q.error() + "'");
   }
@@ -1661,19 +1687,20 @@ int main(int argc, char **argv) {
   read_config();
   clean_cache();
   parse_args(argc, argv);
-  MySQL::Server srv;
-  connect_to_database(srv);
-  create_doi_table(srv);
-  fill_journal_abbreviations(srv);
-  fill_journals_no_abbreviation(srv);
-  fill_publisher_fixups(srv);
-  vector<tuple<string, string, string>> doi_list;
+  connect_to_database();
+  create_doi_table();
+  fill_journal_abbreviations();
+  fill_journals_no_abbreviation();
+  fill_publisher_fixups();
+  DOI_LIST doi_list;
   fill_doi_list(doi_list);
   for (const auto& e : g_services) {
-    e.second(doi_list, srv);
+    if (get<4>(e.second)) {
+      query_service(e.first, e.second, doi_list);
+    }
   }
-  print_publisher_list(srv);
-  srv.disconnect();
+  print_publisher_list();
+  g_server.disconnect();
   g_output.close();
   exit(0);
 }
