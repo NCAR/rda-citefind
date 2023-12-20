@@ -6,13 +6,14 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <sys/stat.h>
-#include <MySQL.hpp>
+#include <PostgreSQL.hpp>
 #include <json.hpp>
 #include <strutils.hpp>
 #include <utils.hpp>
 #include <tempfile.hpp>
 #include <datetime.hpp>
 
+using namespace PostgreSQL;
 using std::cerr;
 using std::chrono::seconds;
 using std::cout;
@@ -97,7 +98,7 @@ struct Args {
   bool clean_tmpdir, no_works;
 } g_args;
 
-MySQL::Server g_server;
+Server g_server;
 stringstream g_myoutput, g_mail_message;
 unordered_map<string, string> g_journal_abbreviations, g_publisher_fixups;
 unordered_set<string> g_journals_no_abbreviation;
@@ -393,6 +394,12 @@ bool filled_authors_from_cross_ref(string subj_doi, JSON::Object& obj) {
         if (orcid.empty()) {
           orcid = "NULL";
         } else {
+          if (orcid.find("http") == 0) {
+            auto idx = orcid.rfind("/");
+            if (idx != string::npos) {
+              orcid = orcid.substr(idx + 1);
+            }
+          }
           orcid = "'" + orcid + "'";
         }
         if (g_server.insert("citation.works_authors", "id, id_type, last_name, "
@@ -492,16 +499,17 @@ bool filled_authors_from_scopus(string scopus_url, string api_key, string
 }
 
 void regenerate_dataset_descriptions(string whence) {
-  MySQL::LocalQuery q("select v.dsid, count(c.new_flag) from citation."
-      "data_citations as c left join (select distinct dsid, doi from dssdb."
-      "dsvrsn) as v on v.doi = c.doi_data where c.new_flag = '1' group by v."
-      "dsid");
+  LocalQuery q("select v.dsid, count(c.new_flag) from citation.data_citations "
+      "as c left join (select distinct dsid, doi from dssdb.dsvrsn) as v on v."
+      "doi = c.doi_data where c.new_flag = '1' group by v.dsid");
   if (q.submit(g_server) < 0) {
     myerror += "\nError while obtaining list of new " + whence + " citations: '"
         + q.error() + "'";
     return;
   }
   for (const auto& r : q) {
+    g_output << "\nFound " << r[1] << " new " << whence << " data citations "
+        "for " << r[0] << endl;
     g_mail_message << "\nFound " << r[1] << " new " << whence << " data "
         "citations for " << r[0] << endl;
     stringstream oss, ess;
@@ -514,17 +522,16 @@ void regenerate_dataset_descriptions(string whence) {
 }
 
 void reset_new_flag() {
-  string r;
   if (g_server.command("update " + g_args.doi_group.db_data.insert_table +
-      " set new_flag = '0' where new_flag = '1'", r) < 0) {
+      " set new_flag = '0' where new_flag = '1'") < 0) {
     myerror += "\nError updating 'new_flag' in " + g_args.doi_group.db_data.
         insert_table + ": " + g_server.error();
     return;
   }
 }
 
-size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA&
-    service_data, string& try_error) {
+size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
+    string& try_error) {
   static const string API_URL = get<2>(service_data);
   string doi, publisher, asset_type;
   tie(doi, publisher, asset_type) = doi_data;
@@ -702,8 +709,8 @@ void query_crossref(const DOI_LIST& doi_list, const SERVICE_DATA&
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
     tie(doi, publisher, asset_type) = e;
-    g_output << "    querying DOI '" << doi << "' (" << publisher << ", " <<
-        asset_type << ") ..." << endl;
+    g_output << "    querying DOI '" << doi << " | " << publisher << " | " <<
+        asset_type << "' ..." << endl;
     string try_error;
     auto ntries = try_crossref(e, service_data, try_error);
     if (ntries == 3) {
@@ -746,8 +753,8 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
     tie(doi, publisher, asset_type) = e;
-    g_output << "    querying DOI '" << doi << "' (" << publisher << ", " <<
-        asset_type << ") ..." << endl;
+    g_output << "    querying DOI '" << doi << " | " << publisher << " | " <<
+        asset_type << "' ..." << endl;
     auto pgnum = 0;
     auto totres = 0x7fffffff;
     while (pgnum < totres) {
@@ -1034,17 +1041,22 @@ void fill_authors_from_wos(string doi_work, const JSON::Value& v) {
 }
 
 void query_wos(const DOI_LIST& doi_list, const SERVICE_DATA& service_data) {
-return;
+//return;
   static const string API_URL = get<2>(service_data);
   static const string API_KEY_HEADER = "X-ApiKey: " + get<3>(service_data);
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
     tie(doi, publisher, asset_type) = e;
+if (to_lower(doi) == "10.5065/8a4y-cg39") {
+continue;
+}
+    g_output << "    querying DOI '" << doi << " | " << publisher << " | " <<
+        asset_type << "' ..." << endl;
 
     // get the WoS ID for the DOI
     stringstream oss, ess;
     if (mysystem2("/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL
-        + "/?databaseId=DCI&usrQuery=DO=" + doi + "&count=1&firstRecord=1&"
+        + "/?databaseId=WOK&usrQuery=DO=" + doi + "&count=1&firstRecord=1&"
         "viewField=none'\"", oss, ess) < 0) {
       append(myerror, "Error getting WoS ID for DOI '" + doi + "'", "\n");
       continue;
@@ -1056,33 +1068,44 @@ return;
       continue;
     }
     auto wos_id = o["Data"]["Records"]["records"]["REC"][0]["UID"].to_string();
+    if (wos_id.empty()) {
+      g_output << "      No WoS ID found" << endl;
+      continue;
+    }
+    g_output << "      WoS ID: '" << wos_id << "'" << endl;
 
     // get the WoS IDs for the "works" that have cited this DOI
     vector<string> works_ids;
+    auto count = 100;
     auto first_rec = 1;
     auto num_records = 2;
     while (first_rec < num_records) {
       if (mysystem2("/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" +
-          API_URL + "/citing?databaseId=WOS&uniqueId=" + wos_id + "&count=100&"
-          "firstRecord=" + to_string(first_rec) + "&viewField='\"", oss, ess) <
-          0) {
+          API_URL + "/citing?databaseId=WOS&uniqueId=" + wos_id + "&count=" +
+          to_string(count) + "&firstRecord=" + to_string(first_rec) +
+          "&viewField='\"", oss, ess) < 0) {
         append(myerror, "Error getting WoS citation IDs for DOI '" + doi + "'",
             "\n");
         continue;
       }
       o.fill(oss.str());
       auto& arr = o["Data"]["Records"]["records"]["REC"];
-      for (size_t n = 0; n < arr.size(); ++n) {
-        works_ids.emplace_back(arr[n]["UID"].to_string());
+      if (arr.type() != JSON::ValueType::Nonexistent) {
+        for (size_t n = 0; n < arr.size(); ++n) {
+          works_ids.emplace_back(arr[n]["UID"].to_string());
+        }
+        num_records = stoi(o["QueryResult"]["RecordsFound"].to_string());
       }
-      num_records = stoi(o["QueryResult"]["RecordsFound"].to_string());
-      first_rec += 100;
+      first_rec += count;
     }
+    g_output << "      " << works_ids.size() << " citations found ..." <<
+        endl;
     for (const auto& work_id : works_ids) {
       string view_field = "identifiers";
       if (!g_args.no_works) {
         view_field += "+names+titles+pub_info";
       }
+
       // get the data for each "work"
       auto cache_fn = g_config_data.tmpdir + "/cache/" + work_id + ".json";
       struct stat buf;
@@ -1118,6 +1141,8 @@ return;
             doi + ")", "\n");
         continue;
       }
+      g_output << "        WoS ID: '" << work_id << "', DOI: '" << doi_work <<
+          "'" << endl;
       if (g_server.insert(g_args.doi_group.db_data.insert_table, "doi_data, "
           "doi_work, new_flag", "'" + doi + "', '" + doi_work + "', '1'",
             "update doi_data = values(doi_data)") < 0) {
@@ -1471,17 +1496,16 @@ void parse_args(int argc, char **argv) {
 }
 
 void connect_to_database() {
-  g_server.connect("rda-db.ucar.edu", "metadata", "metadata", "");
+  g_server.connect("rda-db.ucar.edu", "metadata", "metadata", "rdadb");
   if (!g_server) {
     add_to_error_and_exit("unable to connect to the database");
   }
 }
 
 void create_doi_table() {
-  if (!MySQL::table_exists(g_server, g_args.doi_group.db_data.insert_table)) {
-    string res;
+  if (!table_exists(g_server, g_args.doi_group.db_data.insert_table)) {
     if (g_server.command("create table " + g_args.doi_group.db_data.insert_table
-        + " like citation.template_data_citations", res) < 0) {
+        + " like citation.template_data_citations") < 0) {
       add_to_error_and_exit("unable to create citation table '" + g_args.
           doi_group.db_data.insert_table + "'; error: '" + g_server.error() +
           "'");
@@ -1490,7 +1514,7 @@ void create_doi_table() {
 }
 
 void fill_journal_abbreviations() {
-  MySQL::LocalQuery q("*", "citation.journal_abbreviations");
+  LocalQuery q("word, abbreviation", "citation.journal_abbreviations");
   if (q.submit(g_server) < 0) {
     add_to_error_and_exit("unable to get journal abbreviatons: '" + q.error() +
         "'");
@@ -1501,7 +1525,7 @@ void fill_journal_abbreviations() {
 }
 
 void fill_journals_no_abbreviation() {
-  MySQL::LocalQuery q("*", "citation.journal_no_abbreviation");
+  LocalQuery q("full_name", "citation.journal_no_abbreviation");
   if (q.submit(g_server) < 0) {
     add_to_error_and_exit("unable to get journals with no abbrevations: '" + q.
         error() + "'");
@@ -1512,7 +1536,7 @@ void fill_journals_no_abbreviation() {
 }
 
 void fill_publisher_fixups() {
-  MySQL::LocalQuery q("*", "citation.publisher_fixups");
+  LocalQuery q("original_name, fixup", "citation.publisher_fixups");
   if (q.submit(g_server) < 0) {
     add_to_error_and_exit("unable to get publisher fixups: '" + q.error() +
         "'");
@@ -1524,12 +1548,12 @@ void fill_publisher_fixups() {
 
 void fill_doi_list_from_db(DOI_LIST& doi_list) {
   g_output << "    filling list from a database ..." << endl;
-  MySQL::Server srv(g_args.doi_group.db_data.host, g_args.doi_group.db_data.
-      username, g_args.doi_group.db_data.password, "");
+  Server srv(g_args.doi_group.db_data.host, g_args.doi_group.db_data.username,
+      g_args.doi_group.db_data.password, "rdadb");
   if (!srv) {
     add_to_error_and_exit("unable to connect to MySQL server for the DOI list");
   }
-  MySQL::LocalQuery q(g_args.doi_group.db_data.doi_query);
+  LocalQuery q(g_args.doi_group.db_data.doi_query);
   if (q.submit(srv) < 0) {
     add_to_error_and_exit("mysql error '" + q.error() + "' while getting the "
         "DOI list");
@@ -1671,7 +1695,7 @@ void query_service(string service_id, const SERVICE_DATA& service_data, const
 }
 
 void print_publisher_list() {
-  MySQL::LocalQuery q("distinct publisher", "citation.works");
+  LocalQuery q("distinct publisher", "citation.works");
   if (q.submit(g_server) < 0) {
     add_to_error_and_exit("unable to get list of pubishers from 'works' table: "
         "'" + q.error() + "'");
@@ -1696,6 +1720,7 @@ int main(int argc, char **argv) {
   fill_doi_list(doi_list);
   for (const auto& e : g_services) {
     if (get<4>(e.second)) {
+      g_mail_message << "Querying '" << e.first << "'." << endl;
       query_service(e.first, e.second, doi_list);
     }
   }
