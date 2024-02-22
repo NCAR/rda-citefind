@@ -59,9 +59,33 @@ struct Args {
 
 extern void add_to_error_and_exit(std::string msg);
 extern void clean_up();
+extern void insert_source(std::string doi_work, std::string doi_data, std::
+    string service);
 extern void read_config();
 
 extern std::string convert_unicodes(std::string value);
+
+extern bool inserted_book_data(std::string isbn);
+extern bool inserted_book_data_from_google(std::string isbn);
+extern bool inserted_book_data_from_openlibrary(std::string isbn);
+extern bool inserted_book_works_data(std::string isbn, std::string title, std::
+    string publisher, std::string service);
+extern bool inserted_book_chapter_works_data(std::string doi, std::string pages,
+    std::string isbn, std::string service);
+extern bool inserted_citation(std::string doi, std::string doi_work, std::string
+    service);
+extern bool inserted_doi_data(std::string doi, std::string publisher, std::
+    string asset_type, std::string service);
+extern bool inserted_general_works_data(std::string doi, std::string title,
+    std::string pub_year, std::string works_type, std::string publisher, std::
+    string service, std::string service_id);
+extern bool inserted_journal_works_data(std::string doi, std::string pub_name,
+    std::string volume, std::string pages, std::string service);
+extern bool inserted_proceedings_works_data(std::string doi, std::string
+    pub_name, std::string volume, std::string pages, std::string service);
+extern bool inserted_works_author(std::string pid, std::string pid_type, std::
+    string first_name, std::string middle_name, std::string last_name, std::
+    string orcid_id, size_t sequence, std::string whence);
 
 } // end namespace citefind
 
