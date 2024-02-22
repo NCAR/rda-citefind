@@ -1260,7 +1260,7 @@ void connect_to_database(const JSON::Value& v) {
 }
 
 void read_config() {
-  std::ifstream ifs("/glade/u/home/dattore/dois/citefind.cnf");
+  std::ifstream ifs("/glade/u/home/dattore/citefind/conf/local_citefind.conf");
   if (!ifs.is_open()) {
     citefind::add_to_error_and_exit("unable to open configuration file");
   }
@@ -1298,15 +1298,6 @@ void read_config() {
     c.publisher = a["publisher"].to_string();
     assert_configuration_value("db", a["db"], JSON::ValueType::Object, c.id);
     auto& db = a["db"];
-    assert_configuration_value("host", db["host"], JSON::ValueType::String, c.
-        id);
-    c.db_data.host = db["host"].to_string();
-    assert_configuration_value("username", db["username"], JSON::ValueType::
-        String, c.id);
-    c.db_data.username = db["username"].to_string();
-    assert_configuration_value("password", db["password"], JSON::ValueType::
-        String, c.id);
-    c.db_data.password = db["password"].to_string();
     assert_configuration_value("insert-table", db["insert-table"], JSON::
         ValueType::String, c.id);
     c.db_data.insert_table = db["insert-table"].to_string();
@@ -1533,14 +1524,8 @@ void fill_publisher_fixups() {
 
 void fill_doi_list_from_db(DOI_LIST& doi_list) {
   g_output << "    filling list from a database ..." << endl;
-  Server srv(g_args.doi_group.db_data.host, g_args.doi_group.db_data.username,
-      g_args.doi_group.db_data.password, "rdadb");
-  if (!srv) {
-    citefind::add_to_error_and_exit("unable to connect to MySQL server for the "
-        "DOI list");
-  }
   LocalQuery q(g_args.doi_group.db_data.doi_query);
-  if (q.submit(srv) < 0) {
+  if (q.submit(g_server) < 0) {
     citefind::add_to_error_and_exit("mysql error '" + q.error() + "' while "
         "getting the DOI list");
   }
@@ -1549,7 +1534,6 @@ void fill_doi_list_from_db(DOI_LIST& doi_list) {
     doi_list.emplace_back(make_tuple(r[0], g_args.doi_group.publisher,
         g_config_data.default_asset_type));
   }
-  srv.disconnect();
   g_output << "    ... found " << doi_list.size() << " DOIs." << endl;
 }
 
