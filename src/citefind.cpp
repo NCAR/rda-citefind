@@ -649,6 +649,8 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
       mysystem2("/bin/tcsh -c \"/bin/rm -f " + filename + "\"", oss, ess);
       continue;
     }
+    g_output << "      " << doi_obj["message"]["events"].size() << " citations "
+        "found ..." << endl;
     for (size_t n = 0; n < doi_obj["message"]["events"].size(); ++n) {
 
       // get the "works" DOI
@@ -1249,6 +1251,14 @@ string url_encode(string url) {
   return url;
 }
 
+void connect_to_database(const JSON::Value& v) {
+  g_server.connect(v["host"].to_string(), v["username"].to_string(), v[
+      "password"].to_string(), v["schema"].to_string());
+  if (!g_server) {
+    citefind::add_to_error_and_exit("unable to connect to the database");
+  }
+}
+
 void read_config() {
   std::ifstream ifs("/glade/u/home/dattore/dois/citefind.cnf");
   if (!ifs.is_open()) {
@@ -1267,6 +1277,10 @@ void read_config() {
     citefind::add_to_error_and_exit("temporary directory '" + g_config_data.
         tmpdir + "' is missing");
   }
+  if (o["db-config"].type() == JSON::ValueType::Nonexistent) {
+    citefind::add_to_error_and_exit("no database configuration found");
+  }
+  connect_to_database(o["db-config"]);
   g_output.open(g_config_data.tmpdir + "/output." + dateutils::
       current_date_time().to_string("%Y%m%d%H%MM"));
   g_output << "Configuration file open and ready to parse ..." << endl;
@@ -1470,13 +1484,6 @@ void parse_args(int argc, char **argv) {
     trim(g_args.doi_group.publisher);
     g_config_data.default_asset_type = sp[2];
     trim(g_config_data.default_asset_type);
-  }
-}
-
-void connect_to_database() {
-  g_server.connect("rda-db.ucar.edu", "metadata", "metadata", "rdadb");
-  if (!g_server) {
-    citefind::add_to_error_and_exit("unable to connect to the database");
   }
 }
 
@@ -1694,7 +1701,6 @@ int main(int argc, char **argv) {
   read_config();
   clean_cache();
   parse_args(argc, argv);
-  connect_to_database();
   create_doi_table();
   fill_journal_abbreviations();
   fill_journals_no_abbreviation();
