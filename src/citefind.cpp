@@ -1,3 +1,4 @@
+#include "../include/citefind.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -47,57 +48,8 @@ using unixutils::mysystem2;
 
 string myerror = "";
 string mywarning = "";
-
-struct ConfigData {
-  struct DOI_Group {
-    DOI_Group() : id(), publisher(), db_data(), api_data() { }
-
-    struct DB_Data {
-      DB_Data() : host(), username(), password(), doi_query(), insert_table()
-      { }
-
-      string host, username, password;
-      string doi_query, insert_table;
-    };
-
-    struct API_Data {
-      struct Response {
-        Response() : doi_path(), publisher_path(), asset_type_path() { }
-
-        string doi_path, publisher_path, asset_type_path;
-      };
-
-      struct Pagination {
-        Pagination() : page_num(), page_cnt() { }
-
-        string page_num, page_cnt;
-      };
-
-      API_Data() : url(), response(), pagination() { }
-
-      string url;
-      Response response;
-      Pagination pagination;
-    };
-
-    string id, publisher;
-    DB_Data db_data;
-    API_Data api_data;
-  };
-
-  ConfigData() : tmpdir(), default_asset_type(), doi_groups() { }
-
-  string tmpdir, default_asset_type;
-  vector<DOI_Group> doi_groups;
-} g_config_data;
-
-struct Args {
-  Args() : doi_group(), clean_tmpdir(true), no_works(false) { }
-
-  ConfigData::DOI_Group doi_group;
-  bool clean_tmpdir, no_works;
-} g_args;
-
+citefind::ConfigData g_config_data;
+citefind::Args g_args;
 Server g_server;
 stringstream g_myoutput, g_mail_message;
 unordered_map<string, string> g_journal_abbreviations, g_publisher_fixups;
@@ -110,38 +62,6 @@ typedef tuple<string, string, string> DOI_DATA;
 typedef vector<DOI_DATA> DOI_LIST;
 typedef tuple<string, string, string, string, bool> SERVICE_DATA;
 unordered_map<string, SERVICE_DATA> g_services;
-
-void clean_up() {
-  if (g_args.clean_tmpdir) {
-    stringstream oss, ess;
-    mysystem2("/bin/tcsh -c \"/bin/rm -f " + g_config_data.tmpdir + "/*.json\"",
-        oss, ess);
-  }
-  if (!myerror.empty()) {
-    g_mail_message << myerror << endl;
-  }
-  if (!g_myoutput.str().empty()) {
-    g_mail_message << g_myoutput.str() << endl;
-  }
-  if (!g_mail_message.str().empty()) {
-    unixutils::sendmail("dattore@ucar.edu", "dattore@ucar.edu", "", "citefind "
-        "cron for " + g_args.doi_group.id, g_mail_message.str());
-  }
-}
-
-void add_to_error_and_exit(string msg) {
-  append(myerror, msg, "\n");
-  exit(1);
-}
-
-string convert_unicodes(string value) {
-  replace_all(value, "\\u00a0", " ");
-  replace_all(value, "\\u2010", "-");
-  replace_all(value, "\\u2013", "-");
-  replace_all(value, "\\u2014", "-");
-  replace_all(value, "\\u2019", "'");
-  return value;
-}
 
 string journal_abbreviation(string journal_name) {
   auto parts=split(journal_name);
@@ -563,9 +483,9 @@ bool filled_authors_from_cross_ref(string subj_doi, JSON::Object& obj) {
     }
     auto authlst = obj["message"]["author"];
     for (size_t m = 0; m < authlst.size(); ++m) {
-      auto family = convert_unicodes(substitute(authlst[m]["family"].
+      auto family = citefind::convert_unicodes(substitute(authlst[m]["family"].
           to_string(), "\\", "\\\\"));
-      auto given = convert_unicodes(authlst[m]["given"].to_string());
+      auto given = citefind::convert_unicodes(authlst[m]["given"].to_string());
       if (!given.empty()) {
         replace_all(given, ".-", ". -");
         auto sp = split(given);
@@ -821,8 +741,8 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
               to_string();
         }
       }
-      auto ttl = convert_unicodes(repair_string(sdoi_obj["message"]["title"][0].
-          to_string()));
+      auto ttl = citefind::convert_unicodes(repair_string(sdoi_obj["message"][
+          "title"][0].to_string()));
       auto publisher = sdoi_obj["message"]["publisher"].to_string();
       if (!inserted_general_works_data(sdoi, ttl, pubyr, typ, publisher, get<0>(
           service_data), "")) {
@@ -1318,8 +1238,8 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
 void assert_configuration_value(string value_name, const JSON::Value& value,
     JSON::ValueType assert_type, string id) {
   if (value.type() != assert_type) {
-    add_to_error_and_exit("'" + value_name + "' not found in configuration "
-        "file, or is not a string (id=" + id + ")");
+    citefind::add_to_error_and_exit("'" + value_name + "' not found in "
+        "configuration file, or is not a string (id=" + id + ")");
   }
 }
 
@@ -1332,7 +1252,7 @@ string url_encode(string url) {
 void read_config() {
   std::ifstream ifs("/glade/u/home/dattore/dois/citefind.cnf");
   if (!ifs.is_open()) {
-    add_to_error_and_exit("unable to open configuration file");
+    citefind::add_to_error_and_exit("unable to open configuration file");
   }
   JSON::Object o(ifs);
   ifs.close();
@@ -1344,8 +1264,8 @@ void read_config() {
   g_config_data.default_asset_type = o["default-asset-type"].to_string();
   struct stat buf;
   if (stat(g_config_data.tmpdir.c_str(), &buf) != 0) {
-    add_to_error_and_exit("temporary directory '" + g_config_data.tmpdir + "' "
-        "is missing");
+    citefind::add_to_error_and_exit("temporary directory '" + g_config_data.
+        tmpdir + "' is missing");
   }
   g_output.open(g_config_data.tmpdir + "/output." + dateutils::
       current_date_time().to_string("%Y%m%d%H%MM"));
@@ -1353,7 +1273,7 @@ void read_config() {
   auto& doi_groups = o["doi-groups"];
   for (size_t n = 0; n < doi_groups.size(); ++n) {
     auto& a = doi_groups[n];
-    g_config_data.doi_groups.emplace_back(ConfigData::DOI_Group());
+    g_config_data.doi_groups.emplace_back(citefind::ConfigData::DOI_Group());
     auto& c = g_config_data.doi_groups.back();
     assert_configuration_value("id", a["id"], JSON::ValueType::String,
         to_string(n));
@@ -1424,7 +1344,8 @@ void clean_cache() {
   stringstream oss, ess;
   if (mysystem2("/bin/tcsh -c 'find " + g_config_data.tmpdir + "/cache/* "
       "-mtime +180 -exec rm {} \\;'", oss, ess) != 0) {
-    add_to_error_and_exit("unable to clean cache - error: '" + ess.str() + "'");
+    citefind::add_to_error_and_exit("unable to clean cache - error: '" + ess.
+        str() + "'");
   }
 }
 
@@ -1489,7 +1410,7 @@ void parse_args(int argc, char **argv) {
     }
   }
   if (g_args.doi_group.id.empty()) {
-    add_to_error_and_exit("doi group '" + a1 + "' is not configured");
+    citefind::add_to_error_and_exit("doi group '" + a1 + "' is not configured");
   }
   g_output << "Looking for citation statistics for ID '" << g_args.doi_group.id
       << "'." << endl;
@@ -1555,7 +1476,7 @@ void parse_args(int argc, char **argv) {
 void connect_to_database() {
   g_server.connect("rda-db.ucar.edu", "metadata", "metadata", "rdadb");
   if (!g_server) {
-    add_to_error_and_exit("unable to connect to the database");
+    citefind::add_to_error_and_exit("unable to connect to the database");
   }
 }
 
@@ -1563,9 +1484,9 @@ void create_doi_table() {
   if (!table_exists(g_server, g_args.doi_group.db_data.insert_table)) {
     if (g_server.command("create table " + g_args.doi_group.db_data.insert_table
         + " like citation.template_data_citations") < 0) {
-      add_to_error_and_exit("unable to create citation table '" + g_args.
-          doi_group.db_data.insert_table + "'; error: '" + g_server.error() +
-          "'");
+      citefind::add_to_error_and_exit("unable to create citation table '" +
+          g_args.doi_group.db_data.insert_table + "'; error: '" + g_server.
+          error() + "'");
     }
   }
 }
@@ -1573,8 +1494,8 @@ void create_doi_table() {
 void fill_journal_abbreviations() {
   LocalQuery q("word, abbreviation", "citation.journal_abbreviations");
   if (q.submit(g_server) < 0) {
-    add_to_error_and_exit("unable to get journal abbreviatons: '" + q.error() +
-        "'");
+    citefind::add_to_error_and_exit("unable to get journal abbreviatons: '" + q.
+        error() + "'");
   }
   for (const auto& r : q) {
     g_journal_abbreviations.emplace(r[0], r[1]);
@@ -1584,8 +1505,8 @@ void fill_journal_abbreviations() {
 void fill_journals_no_abbreviation() {
   LocalQuery q("full_name", "citation.journal_no_abbreviation");
   if (q.submit(g_server) < 0) {
-    add_to_error_and_exit("unable to get journals with no abbrevations: '" + q.
-        error() + "'");
+    citefind::add_to_error_and_exit("unable to get journals with no "
+        "abbrevations: '" + q.error() + "'");
   }
   for (const auto& r : q) {
     g_journals_no_abbreviation.emplace(r[0]);
@@ -1595,8 +1516,8 @@ void fill_journals_no_abbreviation() {
 void fill_publisher_fixups() {
   LocalQuery q("original_name, fixup", "citation.publisher_fixups");
   if (q.submit(g_server) < 0) {
-    add_to_error_and_exit("unable to get publisher fixups: '" + q.error() +
-        "'");
+    citefind::add_to_error_and_exit("unable to get publisher fixups: '" + q.
+        error() + "'");
   }
   for (const auto& r : q) {
     g_publisher_fixups.emplace(r[0], r[1]);
@@ -1608,12 +1529,13 @@ void fill_doi_list_from_db(DOI_LIST& doi_list) {
   Server srv(g_args.doi_group.db_data.host, g_args.doi_group.db_data.username,
       g_args.doi_group.db_data.password, "rdadb");
   if (!srv) {
-    add_to_error_and_exit("unable to connect to MySQL server for the DOI list");
+    citefind::add_to_error_and_exit("unable to connect to MySQL server for the "
+        "DOI list");
   }
   LocalQuery q(g_args.doi_group.db_data.doi_query);
   if (q.submit(srv) < 0) {
-    add_to_error_and_exit("mysql error '" + q.error() + "' while getting the "
-        "DOI list");
+    citefind::add_to_error_and_exit("mysql error '" + q.error() + "' while "
+        "getting the DOI list");
   }
   doi_list.reserve(q.num_rows());
   for (const auto& r : q) {
@@ -1642,15 +1564,15 @@ void process_json_value(const JSON::Value& v, deque<string> sp, vector<string>&
     if (v.type() == JSON::ValueType::Null && !null_value.empty()) {
       list.emplace_back(null_value);
     } else {
-      add_to_error_and_exit("json value type '" + to_string(static_cast<int>(v.
-          type())) + "' not recognized");
+      citefind::add_to_error_and_exit("json value type '" + to_string(
+          static_cast<int>(v.type())) + "' not recognized");
     }
   }
 }
 
 void fill_doi_list_from_api(DOI_LIST& doi_list) {
   if (g_args.doi_group.api_data.response.doi_path.empty()) {
-    add_to_error_and_exit("not configured to handle an API response");
+    citefind::add_to_error_and_exit("not configured to handle an API response");
   }
   g_output << "    filling list from an API ..." << endl;
   size_t num_pages = 1;
@@ -1669,8 +1591,8 @@ void fill_doi_list_from_api(DOI_LIST& doi_list) {
     stringstream oss, ess;
     if (mysystem2("/bin/tcsh -c \"curl -s -o - '" + url + "'\"", oss, ess) !=
         0) {
-      add_to_error_and_exit("api error '" + ess.str() + "' while getting the "
-          "DOI list");
+      citefind::add_to_error_and_exit("api error '" + ess.str() + "' while "
+          "getting the DOI list");
     }
     JSON::Object o(oss.str());
     auto sp = split(g_args.doi_group.api_data.response.doi_path, ":");
@@ -1685,7 +1607,8 @@ void fill_doi_list_from_api(DOI_LIST& doi_list) {
       sp.pop_front();
       process_json_value(v, sp, alist, g_config_data.default_asset_type);
       if (alist.size() != dlist.size()) {
-        add_to_error_and_exit("DOI list size != asset type list size");
+        citefind::add_to_error_and_exit("DOI list size != asset type list "
+            "size");
       }
     } else {
       alist.insert(alist.begin(), dlist.size(), g_config_data.
@@ -1698,7 +1621,7 @@ void fill_doi_list_from_api(DOI_LIST& doi_list) {
       sp.pop_front();
       process_json_value(v, sp, plist, g_args.doi_group.publisher);
       if (plist.size() != dlist.size()) {
-        add_to_error_and_exit("DOI list size != publisher list size");
+        citefind::add_to_error_and_exit("DOI list size != publisher list size");
       }
     } else {
       plist.insert(plist.begin(), dlist.size(), g_args.doi_group.publisher);
@@ -1730,8 +1653,8 @@ void fill_doi_list(DOI_LIST& doi_list) {
   } else if (!g_args.doi_group.api_data.url.empty()) {
     fill_doi_list_from_api(doi_list);
   } else {
-    add_to_error_and_exit("can't figure out how to get the list of DOIs from "
-        "the current configuration");
+    citefind::add_to_error_and_exit("can't figure out how to get the list of "
+        "DOIs from the current configuration");
   }
   g_output << "... done filling DOI list." << endl;
 }
@@ -1754,8 +1677,8 @@ void query_service(string service_id, const SERVICE_DATA& service_data, const
 void print_publisher_list() {
   LocalQuery q("distinct publisher", "citation.works");
   if (q.submit(g_server) < 0) {
-    add_to_error_and_exit("unable to get list of pubishers from 'works' table: "
-        "'" + q.error() + "'");
+    citefind::add_to_error_and_exit("unable to get list of pubishers from "
+        "'works' table: '" + q.error() + "'");
   }
   g_myoutput << "\nCurrent Publisher List:" << endl;
   for (const auto& r : q) {
@@ -1767,7 +1690,7 @@ void run_db_integrity_checks() {
 }
 
 int main(int argc, char **argv) {
-  atexit(clean_up);
+  atexit(citefind::clean_up);
   read_config();
   clean_cache();
   parse_args(argc, argv);
