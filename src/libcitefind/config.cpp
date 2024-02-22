@@ -30,15 +30,15 @@ string url_encode(string url) {
 void assert_configuration_value(string value_name, const JSON::Value& value,
     JSON::ValueType assert_type, string id) {
   if (value.type() != assert_type) {
-    citefind::add_to_error_and_exit("'" + value_name + "' not found in "
-        "configuration file, or is not a string (id=" + id + ")");
+    add_to_error_and_exit("'" + value_name + "' not found in configuration "
+        "file, or is not a string (id=" + id + ")");
   }
 }
 
 void read_config() {
   std::ifstream ifs("/glade/u/home/dattore/citefind/conf/local_citefind.conf");
   if (!ifs.is_open()) {
-    citefind::add_to_error_and_exit("unable to open configuration file");
+    add_to_error_and_exit("unable to open configuration file");
   }
   JSON::Object o(ifs);
   ifs.close();
@@ -50,17 +50,17 @@ void read_config() {
   g_config_data.default_asset_type = o["default-asset-type"].to_string();
   struct stat buf;
   if (stat(g_config_data.tmpdir.c_str(), &buf) != 0) {
-    citefind::add_to_error_and_exit("temporary directory '" + g_config_data.
-        tmpdir + "' is missing");
+    add_to_error_and_exit("temporary directory '" + g_config_data.tmpdir +
+        "' is missing");
   }
   if (o["db-config"].type() == JSON::ValueType::Nonexistent) {
-    citefind::add_to_error_and_exit("no database configuration found");
+    add_to_error_and_exit("no database configuration found");
   }
   g_server.connect(o["db-config"]["host"].to_string(), o["db-config"][
       "username"].to_string(), o["db-config"]["password"].to_string(), o[
       "db-config"]["schema"].to_string());
   if (!g_server) {
-    citefind::add_to_error_and_exit("unable to connect to the database");
+    add_to_error_and_exit("unable to connect to the database");
   }
   g_output.open(g_config_data.tmpdir + "/output." + dateutils::
       current_date_time().to_string("%Y%m%d%H%MM"));
@@ -68,7 +68,7 @@ void read_config() {
   auto& doi_groups = o["doi-groups"];
   for (size_t n = 0; n < doi_groups.size(); ++n) {
     auto& grp = doi_groups[n];
-    g_config_data.doi_groups.emplace_back(citefind::ConfigData::DOI_Group());
+    g_config_data.doi_groups.emplace_back(ConfigData::DOI_Group());
     auto& c = g_config_data.doi_groups.back();
     assert_configuration_value("id", grp["id"], JSON::ValueType::String,
         to_string(n));

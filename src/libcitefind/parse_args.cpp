@@ -82,7 +82,7 @@ void parse_args(int argc, char **argv) {
     }
   }
   if (g_args.doi_group.id.empty()) {
-    citefind::add_to_error_and_exit("doi group '" + a1 + "' is not configured");
+    add_to_error_and_exit("doi group '" + a1 + "' is not configured");
   }
   g_output << "Looking for citation statistics for ID '" << g_args.doi_group.id
       << "'." << endl;

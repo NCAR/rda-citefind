@@ -46,9 +46,9 @@ bool filled_authors_from_cross_ref(string subj_doi, JSON::Object& obj) {
     }
     auto authlst = obj["message"]["author"];
     for (size_t m = 0; m < authlst.size(); ++m) {
-      auto family = citefind::convert_unicodes(substitute(authlst[m]["family"].
+      auto family = convert_unicodes(substitute(authlst[m]["family"].
           to_string(), "\\", "\\\\"));
-      auto given = citefind::convert_unicodes(authlst[m]["given"].to_string());
+      auto given = convert_unicodes(authlst[m]["given"].to_string());
       if (!given.empty()) {
         replace_all(given, ".-", ". -");
         auto sp = split(given);
@@ -68,8 +68,8 @@ bool filled_authors_from_cross_ref(string subj_doi, JSON::Object& obj) {
             }
           }
         }
-        if (!citefind::inserted_works_author(subj_doi, "DOI", fname, mname,
-            family, orcid, m, "CrossRef")) {
+        if (!inserted_works_author(subj_doi, "DOI", fname, mname, family, orcid,
+            m, "CrossRef")) {
           stringstream oss, ess;
           mysystem2("/bin/tcsh -c \"/bin/rm -f " + cfile + "\"", oss, ess);
           return false;
@@ -120,11 +120,11 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
       replace_all(sid, "\\/", "/");
       auto sp = split(sid, "doi.org/");
       auto sdoi = sp.back();
-      if (!citefind::inserted_citation(doi, sdoi, get<0>(service_data))) {
+      if (!inserted_citation(doi, sdoi, get<0>(service_data))) {
         continue;
       }
-      citefind::insert_source(sdoi, doi, get<0>(service_data));
-      if (!citefind::inserted_doi_data(doi, publisher, asset_type, get<0>(
+      insert_source(sdoi, doi, get<0>(service_data));
+      if (!inserted_doi_data(doi, publisher, asset_type, get<0>(
           service_data))) {
         continue;
       }
@@ -154,8 +154,8 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
         if (!iss.empty()) {
             vol += "(" + iss + ")";
         }
-        citefind::inserted_journal_works_data(sdoi, pubnam, vol, e["page"].
-            to_string(), get<0>(service_data));
+        inserted_journal_works_data(sdoi, pubnam, vol, e["page"].to_string(),
+            get<0>(service_data));
       } else if (typ == "book-chapter") {
         typ = "C";
         auto isbn = sdoi_obj["message"]["ISBN"][0].to_string();
@@ -164,11 +164,11 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
               "(DOI: " + sdoi + ")", "\n");
           continue;
         }
-        if (!citefind::inserted_book_chapter_works_data(sdoi, sdoi_obj[
-            "message"]["page"].to_string(), isbn, get<0>(service_data))) {
+        if (!inserted_book_chapter_works_data(sdoi, sdoi_obj["message"]["page"].
+            to_string(), isbn, get<0>(service_data))) {
           continue;
         }
-        if (!citefind::inserted_book_data(isbn)) {
+        if (!inserted_book_data(isbn)) {
           append(myerror, "Error inserting ISBN '" + isbn + "' from CrossRef",
               "\n");
           continue;
@@ -182,8 +182,8 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
           pubnam = substitute(sdoi_obj["message"]["short-container-title"][0].
               to_string(), "\\", "\\\\");
         }
-        if (!citefind::inserted_proceedings_works_data(doi, pubnam, "", "", get<
-            0>(service_data))) {
+        if (!inserted_proceedings_works_data(doi, pubnam, "", "", get<0>(
+            service_data))) {
           continue;
         }
       } else {
@@ -205,11 +205,11 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
               to_string();
         }
       }
-      auto ttl = citefind::convert_unicodes(repair_string(sdoi_obj["message"][
-          "title"][0].to_string()));
+      auto ttl = convert_unicodes(repair_string(sdoi_obj["message"]["title"][0].
+          to_string()));
       auto publisher = sdoi_obj["message"]["publisher"].to_string();
-      if (!citefind::inserted_general_works_data(sdoi, ttl, pubyr, typ,
-          publisher, get<0>(service_data), "")) {
+      if (!inserted_general_works_data(sdoi, ttl, pubyr, typ, publisher, get<0>(
+          service_data), "")) {
         continue;
       }
     }
