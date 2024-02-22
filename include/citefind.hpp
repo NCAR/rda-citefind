@@ -6,17 +6,12 @@
 
 namespace citefind {
 
+typedef std::tuple<std::string, std::string, std::string, std::string, bool>
+    SERVICE_DATA;
+
 struct ConfigData {
   struct DOI_Group {
-    DOI_Group() : id(), publisher(), db_data(), api_data() { }
-
-    struct DB_Data {
-      DB_Data() : host(), username(), password(), doi_query(), insert_table()
-      { }
-
-      std::string host, username, password;
-      std::string doi_query, insert_table;
-    };
+    DOI_Group() : id(), publisher(), insert_table(), doi_query() { }
 
     struct API_Data {
       struct Response {
@@ -38,9 +33,15 @@ struct ConfigData {
       Pagination pagination;
     };
 
-    std::string id, publisher;
-    DB_Data db_data;
-    API_Data api_data;
+    struct DOI_Query {
+      DOI_Query() : db_query(), api_data() { }
+
+      std::string db_query;
+      API_Data api_data;
+    };
+
+    std::string id, publisher, insert_table;
+    DOI_Query doi_query;
   };
 
   ConfigData() : tmpdir(), default_asset_type(), doi_groups() { }
@@ -58,6 +59,7 @@ struct Args {
 
 extern void add_to_error_and_exit(std::string msg);
 extern void clean_up();
+extern void read_config();
 
 extern std::string convert_unicodes(std::string value);
 

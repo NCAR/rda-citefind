@@ -60,8 +60,7 @@ string g_single_doi;
 
 typedef tuple<string, string, string> DOI_DATA;
 typedef vector<DOI_DATA> DOI_LIST;
-typedef tuple<string, string, string, string, bool> SERVICE_DATA;
-unordered_map<string, SERVICE_DATA> g_services;
+unordered_map<string, citefind::SERVICE_DATA> g_services;
 
 string journal_abbreviation(string journal_name) {
   auto parts=split(journal_name);
@@ -251,7 +250,7 @@ bool inserted_proceedings_works_data(string doi, string pub_name, string volume,
 
 bool inserted_citation(string doi, string doi_work, string service) {
   if (g_server.insert(
-        g_args.doi_group.db_data.insert_table,
+        g_args.doi_group.insert_table,
         "doi_data, doi_work, new_flag",
         "'" + doi + "', '" + doi_work + "', '1'",
         "(doi_data, doi_work) do nothing"
@@ -610,16 +609,16 @@ void regenerate_dataset_descriptions(string whence) {
 }
 
 void reset_new_flag() {
-  if (g_server.command("update " + g_args.doi_group.db_data.insert_table +
-      " set new_flag = '0' where new_flag = '1'") < 0) {
-    append(myerror, "Error updating 'new_flag' in " + g_args.doi_group.db_data.
+  if (g_server.command("update " + g_args.doi_group.insert_table + " set "
+      "new_flag = '0' where new_flag = '1'") < 0) {
+    append(myerror, "Error updating 'new_flag' in " + g_args.doi_group.
         insert_table + ": " + g_server.error(), "\n");
     return;
   }
 }
 
-size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
-    string& try_error) {
+size_t try_crossref(const DOI_DATA& doi_data, const citefind::SERVICE_DATA&
+    service_data, string& try_error) {
   static const string API_URL = get<2>(service_data);
   string doi, publisher, asset_type;
   tie(doi, publisher, asset_type) = doi_data;
@@ -757,7 +756,7 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
   return ntries;
 }
 
-void query_crossref(const DOI_LIST& doi_list, const SERVICE_DATA&
+void query_crossref(const DOI_LIST& doi_list, const citefind::SERVICE_DATA&
     service_data) {
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
@@ -802,7 +801,7 @@ string publisher_from_cross_ref(string subj_doi) {
   return "";
 }
 
-void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
+void query_elsevier(const DOI_LIST& doi_list, const citefind::SERVICE_DATA&
     service_data) {
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
@@ -1046,7 +1045,8 @@ void fill_authors_from_wos(string doi_work, const JSON::Value& v) {
   }
 }
 
-void query_wos(const DOI_LIST& doi_list, const SERVICE_DATA& service_data) {
+void query_wos(const DOI_LIST& doi_list, const citefind::SERVICE_DATA&
+    service_data) {
 //return;
   static const string API_URL = get<2>(service_data);
   static const string API_KEY_HEADER = "X-ApiKey: " + get<3>(service_data);
@@ -1237,114 +1237,6 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
   reset_new_flag();
 }
 
-void assert_configuration_value(string value_name, const JSON::Value& value,
-    JSON::ValueType assert_type, string id) {
-  if (value.type() != assert_type) {
-    citefind::add_to_error_and_exit("'" + value_name + "' not found in "
-        "configuration file, or is not a string (id=" + id + ")");
-  }
-}
-
-string url_encode(string url) {
-  replace_all(url, "[", "%5B");
-  replace_all(url, "]", "%5D");
-  return url;
-}
-
-void connect_to_database(const JSON::Value& v) {
-  g_server.connect(v["host"].to_string(), v["username"].to_string(), v[
-      "password"].to_string(), v["schema"].to_string());
-  if (!g_server) {
-    citefind::add_to_error_and_exit("unable to connect to the database");
-  }
-}
-
-void read_config() {
-  std::ifstream ifs("/glade/u/home/dattore/citefind/conf/local_citefind.conf");
-  if (!ifs.is_open()) {
-    citefind::add_to_error_and_exit("unable to open configuration file");
-  }
-  JSON::Object o(ifs);
-  ifs.close();
-  assert_configuration_value("temp-dir", o["temp-dir"], JSON::ValueType::String,
-      "main");
-  g_config_data.tmpdir = o["temp-dir"].to_string();
-  assert_configuration_value("default-asset-type", o["default-asset-type"],
-      JSON::ValueType::String, "main");
-  g_config_data.default_asset_type = o["default-asset-type"].to_string();
-  struct stat buf;
-  if (stat(g_config_data.tmpdir.c_str(), &buf) != 0) {
-    citefind::add_to_error_and_exit("temporary directory '" + g_config_data.
-        tmpdir + "' is missing");
-  }
-  if (o["db-config"].type() == JSON::ValueType::Nonexistent) {
-    citefind::add_to_error_and_exit("no database configuration found");
-  }
-  connect_to_database(o["db-config"]);
-  g_output.open(g_config_data.tmpdir + "/output." + dateutils::
-      current_date_time().to_string("%Y%m%d%H%MM"));
-  g_output << "Configuration file open and ready to parse ..." << endl;
-  auto& doi_groups = o["doi-groups"];
-  for (size_t n = 0; n < doi_groups.size(); ++n) {
-    auto& a = doi_groups[n];
-    g_config_data.doi_groups.emplace_back(citefind::ConfigData::DOI_Group());
-    auto& c = g_config_data.doi_groups.back();
-    assert_configuration_value("id", a["id"], JSON::ValueType::String,
-        to_string(n));
-    c.id = a["id"].to_string();
-    g_output << "    found ID '" << a["id"].to_string() << "'" << endl;
-    assert_configuration_value("publisher", a["publisher"], JSON::ValueType::
-        String, c.id);
-    c.publisher = a["publisher"].to_string();
-    assert_configuration_value("db", a["db"], JSON::ValueType::Object, c.id);
-    auto& db = a["db"];
-    assert_configuration_value("insert-table", db["insert-table"], JSON::
-        ValueType::String, c.id);
-    c.db_data.insert_table = db["insert-table"].to_string();
-    if (db["doi"].type() != JSON::ValueType::Nonexistent) {
-      c.db_data.doi_query = db["doi"].to_string();
-    }
-    if (a["api"].type() != JSON::ValueType::Nonexistent) {
-      auto& api = a["api"];
-      assert_configuration_value("url", api["url"], JSON::ValueType::String, c.
-          id);
-      c.api_data.url = api["url"].to_string();
-      assert_configuration_value("response:doi", api["response"]["doi"], JSON::
-          ValueType::String, c.id);
-      c.api_data.response.doi_path = api["response"]["doi"].to_string();
-      assert_configuration_value("response:publisher", api["response"][
-          "publisher"], JSON::ValueType::String, c.id);
-      c.api_data.response.publisher_path = api["response"]["publisher"].
-          to_string();
-      if (api["response"]["asset-type"].type() == JSON::ValueType::String) {
-        c.api_data.response.asset_type_path = api["response"]["asset-type"].
-            to_string();
-      }
-      if (api["pagination"].type() != JSON::ValueType::Nonexistent) {
-        auto& paging = api["pagination"];
-        assert_configuration_value("pagination:page-count", paging[
-            "page-count"], JSON::ValueType::String, c.id);
-        c.api_data.pagination.page_cnt = url_encode(paging["page-count"].
-            to_string());
-        assert_configuration_value("pagination:page-number", paging[
-            "page-number"], JSON::ValueType::String, c.id);
-        c.api_data.pagination.page_num = url_encode(paging["page-number"].
-            to_string());
-      }
-    }
-  }
-  auto& services = o["services"];
-  for (size_t n = 0; n < services.size(); ++n) {
-    auto id = services[n]["id"].to_string();
-    if (!id.empty()) {
-      g_services.emplace(id, make_tuple(services[n]["name"].to_string(),
-          services[n]["title"].to_string(), services[n]["url"].to_string(),
-          services[n]["api-key"].to_string(), true));
-    }
-  }
-  g_output << "... configuration file parsed." << endl;
-}
-
 void clean_cache() {
   stringstream oss, ess;
   if (mysystem2("/bin/tcsh -c 'find " + g_config_data.tmpdir + "/cache/* "
@@ -1421,16 +1313,17 @@ void parse_args(int argc, char **argv) {
       << "'." << endl;
   g_output << "Default publisher is '" << g_args.doi_group.publisher << "'." <<
       endl;
-  if (!g_args.doi_group.api_data.response.publisher_path.empty()) {
-    g_output << "    The path '" << g_args.doi_group.api_data.response.
-        publisher_path << "' will override the default, if found." << endl;
+  if (!g_args.doi_group.doi_query.api_data.response.publisher_path.empty()) {
+    g_output << "    The path '" << g_args.doi_group.doi_query.api_data.
+        response.publisher_path << "' will override the default, if found." <<
+        endl;
   }
-  if (g_args.doi_group.api_data.response.asset_type_path.empty()) {
+  if (g_args.doi_group.doi_query.api_data.response.asset_type_path.empty()) {
     g_output << "No asset-type path specified, so using the default value '" <<
         g_config_data.default_asset_type << "' for DOIs." << endl;
   } else {
-    g_output << "Specified asset-type path '" << g_args.doi_group.api_data.
-        response.asset_type_path << "' will be used for DOIs." << endl;
+    g_output << "Specified asset-type path '" << g_args.doi_group.doi_query.
+        api_data.response.asset_type_path << "' will be used for DOIs." << endl;
   }
   string doi_data;
   string doi_data_delimiter = ";";
@@ -1479,12 +1372,12 @@ void parse_args(int argc, char **argv) {
 }
 
 void create_doi_table() {
-  if (!table_exists(g_server, g_args.doi_group.db_data.insert_table)) {
-    if (g_server.command("create table " + g_args.doi_group.db_data.insert_table
+  if (!table_exists(g_server, g_args.doi_group.insert_table)) {
+    if (g_server.command("create table " + g_args.doi_group.insert_table
         + " like citation.template_data_citations") < 0) {
       citefind::add_to_error_and_exit("unable to create citation table '" +
-          g_args.doi_group.db_data.insert_table + "'; error: '" + g_server.
-          error() + "'");
+          g_args.doi_group.insert_table + "'; error: '" + g_server.error() +
+          "'");
     }
   }
 }
@@ -1524,7 +1417,7 @@ void fill_publisher_fixups() {
 
 void fill_doi_list_from_db(DOI_LIST& doi_list) {
   g_output << "    filling list from a database ..." << endl;
-  LocalQuery q(g_args.doi_group.db_data.doi_query);
+  LocalQuery q(g_args.doi_group.doi_query.db_query);
   if (q.submit(g_server) < 0) {
     citefind::add_to_error_and_exit("mysql error '" + q.error() + "' while "
         "getting the DOI list");
@@ -1562,22 +1455,22 @@ void process_json_value(const JSON::Value& v, deque<string> sp, vector<string>&
 }
 
 void fill_doi_list_from_api(DOI_LIST& doi_list) {
-  if (g_args.doi_group.api_data.response.doi_path.empty()) {
+  if (g_args.doi_group.doi_query.api_data.response.doi_path.empty()) {
     citefind::add_to_error_and_exit("not configured to handle an API response");
   }
   g_output << "    filling list from an API ..." << endl;
   size_t num_pages = 1;
   size_t page_num = 1;
   for (size_t n = 0; n < num_pages; ++n) {
-    auto url = g_args.doi_group.api_data.url;
-    if (!g_args.doi_group.api_data.pagination.page_num.empty()) {
+    auto url = g_args.doi_group.doi_query.api_data.url;
+    if (!g_args.doi_group.doi_query.api_data.pagination.page_num.empty()) {
       if (url.find("?") == string::npos) {
         url += "?";
       } else {
         url += "&";
       }
-      url += g_args.doi_group.api_data.pagination.page_num + "=" + to_string(
-          page_num++);
+      url += g_args.doi_group.doi_query.api_data.pagination.page_num + "=" +
+          to_string(page_num++);
     }
     stringstream oss, ess;
     if (mysystem2("/bin/tcsh -c \"curl -s -o - '" + url + "'\"", oss, ess) !=
@@ -1586,14 +1479,15 @@ void fill_doi_list_from_api(DOI_LIST& doi_list) {
           "getting the DOI list");
     }
     JSON::Object o(oss.str());
-    auto sp = split(g_args.doi_group.api_data.response.doi_path, ":");
+    auto sp = split(g_args.doi_group.doi_query.api_data.response.doi_path, ":");
     auto& v = o[sp.front()];
     sp.pop_front();
     vector<string> dlist;
     process_json_value(v, sp, dlist);
     vector<string> alist;
-    if (!g_args.doi_group.api_data.response.asset_type_path.empty()) {
-      sp = split(g_args.doi_group.api_data.response.asset_type_path, ":");
+    if (!g_args.doi_group.doi_query.api_data.response.asset_type_path.empty()) {
+      sp = split(g_args.doi_group.doi_query.api_data.response.asset_type_path,
+          ":");
       auto& v = o[sp.front()];
       sp.pop_front();
       process_json_value(v, sp, alist, g_config_data.default_asset_type);
@@ -1606,8 +1500,9 @@ void fill_doi_list_from_api(DOI_LIST& doi_list) {
           default_asset_type);
     }
     vector<string> plist;
-    if (!g_args.doi_group.api_data.response.publisher_path.empty()) {
-      sp = split(g_args.doi_group.api_data.response.publisher_path, ":");
+    if (!g_args.doi_group.doi_query.api_data.response.publisher_path.empty()) {
+      sp = split(g_args.doi_group.doi_query.api_data.response.publisher_path,
+          ":");
       auto& v = o[sp.front()];
       sp.pop_front();
       process_json_value(v, sp, plist, g_args.doi_group.publisher);
@@ -1620,9 +1515,10 @@ void fill_doi_list_from_api(DOI_LIST& doi_list) {
     for (size_t m = 0; m < dlist.size(); ++m) {
       doi_list.emplace_back(make_tuple(dlist[m], plist[m], to_lower(alist[m])));
     }
-    if (num_pages == 1 && !g_args.doi_group.api_data.pagination.page_cnt.
-        empty()) {
-      auto sp = split(g_args.doi_group.api_data.pagination.page_cnt, ":");
+    if (num_pages == 1 && !g_args.doi_group.doi_query.api_data.pagination.
+        page_cnt.empty()) {
+      auto sp = split(g_args.doi_group.doi_query.api_data.pagination.page_cnt,
+          ":");
       auto& v = o[sp.front()];
       sp.pop_front();
       vector<string> list;
@@ -1639,9 +1535,9 @@ void fill_doi_list(DOI_LIST& doi_list) {
   if (!g_single_doi.empty()) {
     doi_list.emplace_back(make_tuple(g_single_doi, g_args.doi_group.publisher,
         g_config_data.default_asset_type));
-  } else if (!g_args.doi_group.db_data.doi_query.empty()) {
+  } else if (!g_args.doi_group.doi_query.db_query.empty()) {
     fill_doi_list_from_db(doi_list);
-  } else if (!g_args.doi_group.api_data.url.empty()) {
+  } else if (!g_args.doi_group.doi_query.api_data.url.empty()) {
     fill_doi_list_from_api(doi_list);
   } else {
     citefind::add_to_error_and_exit("can't figure out how to get the list of "
@@ -1650,8 +1546,8 @@ void fill_doi_list(DOI_LIST& doi_list) {
   g_output << "... done filling DOI list." << endl;
 }
 
-void query_service(string service_id, const SERVICE_DATA& service_data, const
-    DOI_LIST& doi_list) {
+void query_service(string service_id, const citefind::SERVICE_DATA&
+    service_data, const DOI_LIST& doi_list) {
   g_output << "Querying " << get<0>(service_data) << " ..." << endl;
   if (service_id == "crossref") {
     query_crossref(doi_list, service_data);
@@ -1682,7 +1578,7 @@ void run_db_integrity_checks() {
 
 int main(int argc, char **argv) {
   atexit(citefind::clean_up);
-  read_config();
+  citefind::read_config();
   clean_cache();
   parse_args(argc, argv);
   create_doi_table();
