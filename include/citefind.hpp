@@ -3,9 +3,12 @@
 
 #include <string>
 #include <vector>
+#include <json.hpp>
 
 namespace citefind {
 
+typedef std::tuple<std::string, std::string, std::string> DOI_DATA;
+typedef std::vector<citefind::DOI_DATA> DOI_LIST;
 typedef std::tuple<std::string, std::string, std::string, std::string, bool>
     SERVICE_DATA;
 
@@ -59,13 +62,24 @@ struct Args {
 
 extern void add_to_error_and_exit(std::string msg);
 extern void clean_up();
+extern void get_citations(std::string url, std::string service_id, size_t sleep,
+    std::string filename, JSON::Object& doi_obj);
 extern void insert_source(std::string doi_work, std::string doi_data, std::
     string service);
 extern void parse_args(int argc, char **argv);
+extern void query_crossref(const DOI_LIST& doi_list, const SERVICE_DATA&
+    service_data);
 extern void read_config();
+extern void regenerate_dataset_descriptions(std::string whence);
+extern void reset_new_flag();
 
+extern std::string cache_file(std::string doi);
 extern std::string convert_unicodes(std::string value);
+extern std::string publisher_from_cross_ref(std::string subj_doi);
+extern std::string repair_string(std::string s);
 
+extern bool filled_authors_from_cross_ref(std::string subj_doi, JSON::Object&
+    obj);
 extern bool inserted_book_data(std::string isbn);
 extern bool inserted_book_data_from_google(std::string isbn);
 extern bool inserted_book_data_from_openlibrary(std::string isbn);

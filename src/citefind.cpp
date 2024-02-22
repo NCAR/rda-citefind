@@ -57,8 +57,6 @@ const regex email_re("(.)*@(.)*\\.(.)*");
 std::ofstream g_output;
 string g_single_doi;
 
-typedef tuple<string, string, string> DOI_DATA;
-typedef vector<DOI_DATA> DOI_LIST;
 unordered_map<string, citefind::SERVICE_DATA> g_services;
 
 string journal_abbreviation(string journal_name) {
@@ -88,118 +86,6 @@ string journal_abbreviation(string journal_name) {
     return abbreviation;
   }
   return journal_name;
-}
-
-string repair_string(string s) {
-  auto sp = split(s, "\\n");
-  if (sp.size() > 1) {
-    s.clear();
-    for (auto& p : sp) {
-      trim(p);
-      append(s, p, " ");
-    }
-  }
-  replace_all(s, "\\/", "/");
-  replace_all(s, "\\", "\\\\");
-  return s;
-}
-
-void get_citations(string url, string service_id, size_t sleep, string
-    filename, JSON::Object& doi_obj) {
-  struct stat buf;
-  if (stat(filename.c_str(), &buf) != 0) {
-    sleep_for(seconds(3));
-    stringstream oss, ess;
-    mysystem2("/bin/tcsh -c \"curl -s -o " + filename + " '" + url + "'\"", oss,
-        ess);
-    if (!ess.str().empty()) {
-      append(myerror, "Error while getting " + service_id + " citations from '"
-          + url + "': '" + ess.str() + "'", "\n");
-    }
-  }
-  ifstream ifs(filename.c_str());
-  try {
-    doi_obj.fill(ifs);
-  } catch (...) {
-    append(myerror, "unable to create JSON object from file '" + filename + "'",
-        "\n");
-  }
-  ifs.close();
-}
-
-string cache_file(string doi) {
-  string fnam = doi;
-  replace_all(fnam, "/", "@@");
-  fnam = g_config_data.tmpdir + "/cache/" + fnam + ".crossref.json";
-  struct stat buf;
-  if (stat(fnam.c_str(), &buf) != 0) {
-    sleep_for(seconds(3));
-    stringstream oss, ess;
-    mysystem2("/bin/tcsh -c \"curl -s -o '" + fnam + "' 'https://api.crossref."
-        "org/works/" + doi + "'\"", oss, ess);
-    if (!ess.str().empty()) {
-      append(myerror, "Error while getting CrossRef data for works DOI '" + doi
-          + "': '" + ess.str() + "'", "\n");
-      mysystem2("/bin/tcsh -c \"/bin/rm -f " + fnam + "\"", oss, ess);
-      return "";
-    }
-  }
-  return fnam;
-}
-
-bool filled_authors_from_cross_ref(string subj_doi, JSON::Object& obj) {
-  auto cfile = cache_file(subj_doi);
-  if (!cfile.empty()) {
-    ifstream ifs(cfile.c_str());
-    try {
-      obj.fill(ifs);
-    } catch (...) {
-      append(myerror, "unable to create JSON object from '" + cfile + "'",
-          "\n");
-      return false;
-    }
-    ifs.close();
-    if (!obj) {
-      append(myerror, "Error reading CrossRef author JSON for works DOI '" +
-          subj_doi + "': 'unable to create JSON object'", "\n");
-      stringstream oss, ess;
-      mysystem2("/bin/tcsh -c \"/bin/rm -f " + cfile + "\"", oss, ess);
-      return false;
-    }
-    auto authlst = obj["message"]["author"];
-    for (size_t m = 0; m < authlst.size(); ++m) {
-      auto family = citefind::convert_unicodes(substitute(authlst[m]["family"].
-          to_string(), "\\", "\\\\"));
-      auto given = citefind::convert_unicodes(authlst[m]["given"].to_string());
-      if (!given.empty()) {
-        replace_all(given, ".-", ". -");
-        auto sp = split(given);
-        auto fname = substitute(sp.front(), "\\", "\\\\");
-        string mname;
-        for (size_t n = 1; n < sp.size(); ++n) {
-          append(mname, substitute(sp[n], "\\", "\\\\"), " ");
-        }
-        auto orcid = authlst[m]["ORCID"].to_string();
-        if (orcid.empty()) {
-          orcid = "NULL";
-        } else {
-          if (orcid.find("http") == 0) {
-            auto idx = orcid.rfind("/");
-            if (idx != string::npos) {
-              orcid = orcid.substr(idx + 1);
-            }
-          }
-        }
-        if (!citefind::inserted_works_author(subj_doi, "DOI", fname, mname,
-            family, orcid, m, "CrossRef")) {
-          stringstream oss, ess;
-          mysystem2("/bin/tcsh -c \"/bin/rm -f " + cfile + "\"", oss, ess);
-          return false;
-        }
-      }
-    }
-  }
-  return true;
 }
 
 bool filled_authors_from_scopus(string scopus_url, string api_key, string
@@ -271,224 +157,8 @@ bool filled_authors_from_scopus(string scopus_url, string api_key, string
   return false;
 }
 
-void regenerate_dataset_descriptions(string whence) {
-  LocalQuery q("select v.dsid, count(c.new_flag) from citation.data_citations "
-      "as c left join (select distinct dsid, doi from dssdb.dsvrsn) as v on v."
-      "doi ilike c.doi_data where c.new_flag = '1' group by v.dsid");
-  if (q.submit(g_server) < 0) {
-    append(myerror, "Error while obtaining list of new " + whence +
-        " citations: '" + q.error() + "'", "\n");
-    return;
-  }
-  for (const auto& r : q) {
-    g_output << "\nFound " << r[1] << " new " << whence << " data citations "
-        "for " << r[0] << endl;
-    g_mail_message << "\nFound " << r[1] << " new " << whence << " data "
-        "citations for " << r[0] << endl;
-    stringstream oss, ess;
-    mysystem2("/bin/tcsh -c \"dsgen " + r[0].substr(2) + "\"", oss, ess);
-    if (!ess.str().empty()) {
-      append(myerror, "Error while regenerating " + r[0] + " (" + whence + "):"
-          "\n  " + ess.str(), "\n");
-    }
-  }
-}
-
-void reset_new_flag() {
-  if (g_server.command("update " + g_args.doi_group.insert_table + " set "
-      "new_flag = '0' where new_flag = '1'") < 0) {
-    append(myerror, "Error updating 'new_flag' in " + g_args.doi_group.
-        insert_table + ": " + g_server.error(), "\n");
-    return;
-  }
-}
-
-size_t try_crossref(const DOI_DATA& doi_data, const citefind::SERVICE_DATA&
-    service_data, string& try_error) {
-  static const string API_URL = get<2>(service_data);
-  string doi, publisher, asset_type;
-  tie(doi, publisher, asset_type) = doi_data;
-  size_t ntries = 0;
-  while (ntries < 3) {
-    sleep_for(seconds(ntries * 5));
-    ++ntries;
-    auto filename = doi;
-    replace_all(filename, "/", "@@");
-    filename = g_config_data.tmpdir + "/" + filename + ".crossref.json";
-    string url = API_URL + "?source=crossref&obj-id=" + doi;
-    JSON::Object doi_obj;
-    get_citations(url, get<0>(service_data), 3, filename, doi_obj);
-    if (!doi_obj) {
-      try_error += "\nServer response was not a JSON object\n/bin/tcsh -c \""
-          "curl -o " + filename + " '" + API_URL + "?source=crossref&obj-id=" +
-          doi + "'\"";
-      stringstream oss, ess;
-      mysystem2("/bin/tcsh -c \"/bin/rm -f " + filename + "\"", oss, ess);
-      continue;
-    }
-    if (doi_obj["status"].to_string() != "ok") {
-      try_error += "\nServer failure: '" + doi_obj["message"].to_string() +
-          "'\n/bin/tcsh -c \"curl -o " + filename + " '" + API_URL + "?source="
-          "crossref&obj-id=" + doi + "'\"";
-      stringstream oss, ess;
-      mysystem2("/bin/tcsh -c \"/bin/rm -f " + filename + "\"", oss, ess);
-      continue;
-    }
-    g_output << "      " << doi_obj["message"]["events"].size() << " citations "
-        "found ..." << endl;
-    for (size_t n = 0; n < doi_obj["message"]["events"].size(); ++n) {
-
-      // get the "works" DOI
-      auto sid = doi_obj["message"]["events"][n]["subj_id"].to_string();
-      replace_all(sid, "\\/", "/");
-      auto sp = split(sid, "doi.org/");
-      auto sdoi = sp.back();
-      if (!citefind::inserted_citation(doi, sdoi, get<0>(service_data))) {
-        continue;
-      }
-      citefind::insert_source(sdoi, doi, get<0>(service_data));
-      if (!citefind::inserted_doi_data(doi, publisher, asset_type, get<0>(
-          service_data))) {
-        continue;
-      }
-      if (g_args.no_works) {
-        continue;
-      }
-
-      // add the author data for the citing "work"
-      JSON::Object sdoi_obj;
-      if (!filled_authors_from_cross_ref(sdoi, sdoi_obj)) {
-        continue;
-      }
-
-      // get the type of the "work" and add type-specific data
-      auto typ = sdoi_obj["message"]["type"].to_string();
-      if (typ == "journal-article") {
-        typ = "J";
-        auto pubnam = substitute(sdoi_obj["message"]["container-title"][0]
-            .to_string(), "\\", "\\\\");
-        if (pubnam.empty()) {
-          pubnam = substitute(sdoi_obj["message"]["short-container-title"][0]
-            .to_string(), "\\", "\\\\");
-        }
-        auto& e = sdoi_obj["message"];
-        auto vol = e["volume"].to_string();
-        auto iss = e["issue"].to_string();
-        if (!iss.empty()) {
-            vol += "(" + iss + ")";
-        }
-        citefind::inserted_journal_works_data(sdoi, pubnam, vol, e["page"].
-            to_string(), get<0>(service_data));
-      } else if (typ == "book-chapter") {
-        typ = "C";
-        auto isbn = sdoi_obj["message"]["ISBN"][0].to_string();
-        if (isbn.empty()) {
-          append(myerror, "Error obtaining CrossRef ISBN for book chapter "
-              "(DOI: " + sdoi + ")", "\n");
-          continue;
-        }
-        if (!citefind::inserted_book_chapter_works_data(sdoi, sdoi_obj[
-            "message"]["page"].to_string(), isbn, get<0>(service_data))) {
-          continue;
-        }
-        if (!citefind::inserted_book_data(isbn)) {
-          append(myerror, "Error inserting ISBN '" + isbn + "' from CrossRef",
-              "\n");
-          continue;
-        }
-      } else if (typ == "proceedings-article" || (typ == "posted-content" &&
-          sdoi_obj["message"]["subtype"].to_string() == "preprint")) {
-        typ = "P";
-        auto pubnam = substitute(sdoi_obj["message"]["container-title"][0].
-            to_string(), "\\", "\\\\");
-        if (pubnam.empty()) {
-          pubnam = substitute(sdoi_obj["message"]["short-container-title"][0].
-              to_string(), "\\", "\\\\");
-        }
-        if (!citefind::inserted_proceedings_works_data(doi, pubnam, "", "", get<
-            0>(service_data))) {
-          continue;
-        }
-      } else {
-        append(myerror, "**UNKNOWN CrossRef TYPE: " + typ + " for work DOI: '" +
-            sdoi + "' citing '" + doi + "'", "\n");
-        continue;
-      }
-
-      // add general data about the "work"
-      auto pubyr = sdoi_obj["message"]["published-print"]["date-parts"][0][0].
-          to_string();
-      if (pubyr.empty()) {
-        if (typ == "P") {
-          pubyr = sdoi_obj["message"]["issued"]["date-parts"][0][0].to_string();
-          auto sp = split(pubyr, ",");
-          pubyr = sp.front();
-        } else {
-          pubyr = sdoi_obj["message"]["published-online"]["date-parts"][0][0].
-              to_string();
-        }
-      }
-      auto ttl = citefind::convert_unicodes(repair_string(sdoi_obj["message"][
-          "title"][0].to_string()));
-      auto publisher = sdoi_obj["message"]["publisher"].to_string();
-      if (!citefind::inserted_general_works_data(sdoi, ttl, pubyr, typ,
-          publisher, get<0>(service_data), "")) {
-        continue;
-      }
-    }
-    try_error = "";
-    break;
-  }
-  return ntries;
-}
-
-void query_crossref(const DOI_LIST& doi_list, const citefind::SERVICE_DATA&
-    service_data) {
-  string doi, publisher, asset_type;
-  for (const auto& e : doi_list) {
-    tie(doi, publisher, asset_type) = e;
-    g_output << "    querying DOI '" << doi << " | " << publisher << " | " <<
-        asset_type << "' ..." << endl;
-    string try_error;
-    auto ntries = try_crossref(e, service_data, try_error);
-    if (ntries == 3) {
-      append(myerror, "Error reading CrossRef JSON for DOI '" + doi + "': '" +
-          try_error + "'\n/bin/tcsh -c \"curl '" + get<2>(service_data) +
-          "?source=crossref&obj-id=" + doi + "'\"", "\n");
-    }
-  }
-  if (g_args.doi_group.id == "rda") {
-    regenerate_dataset_descriptions(get<0>(service_data));
-  }
-  reset_new_flag();
-}
-
-string publisher_from_cross_ref(string subj_doi) {
-  auto filename = cache_file(subj_doi);
-  if (!filename.empty()) {
-    ifstream ifs(filename.c_str());
-    JSON::Object obj;
-    try {
-      obj.fill(ifs);
-    } catch (...) {
-      append(myerror, "unable to create JSON object from '" + filename + "'",
-          "\n");
-      return "";
-    }
-    if (!obj) {
-      append(myerror, "Error reading CrossRef publisher JSON for works DOI '" +
-          subj_doi + "': 'unable to create JSON object'", "\n");
-      stringstream oss, ess;
-      mysystem2("/bin/tcsh -c \"/bin/rm -f " + filename + "\"", oss, ess);
-      return "";
-    }
-    return obj["message"]["publisher"].to_string();
-  }
-  return "";
-}
-
-void query_elsevier(const DOI_LIST& doi_list, const citefind::SERVICE_DATA&
-    service_data) {
+void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
+    SERVICE_DATA& service_data) {
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
     tie(doi, publisher, asset_type) = e;
@@ -510,7 +180,8 @@ void query_elsevier(const DOI_LIST& doi_list, const citefind::SERVICE_DATA&
       size_t num_tries = 0;
       for (; num_tries < 3; ++num_tries) {
         sleep_for(seconds(num_tries * 5));
-        get_citations(url, get<0>(service_data), 1, filename, doi_obj);
+        citefind::get_citations(url, get<0>(service_data), 1, filename,
+            doi_obj);
         if (doi_obj && doi_obj["service-error"].type() == JSON::ValueType::
             Nonexistent) {
           break;
@@ -579,7 +250,7 @@ void query_elsevier(const DOI_LIST& doi_list, const citefind::SERVICE_DATA&
         if (!filled_authors_from_scopus(scopus_url, get<3>(service_data), sdoi,
             author_obj)) {
           JSON::Object cr_obj;
-          filled_authors_from_cross_ref(sdoi, cr_obj);
+          citefind::filled_authors_from_cross_ref(sdoi, cr_obj);
         }
 
         // get the type of the "work" and add type-specific data
@@ -633,12 +304,12 @@ void query_elsevier(const DOI_LIST& doi_list, const citefind::SERVICE_DATA&
         auto pubyr = doi_obj["search-results"]["entry"][n]["prism:coverDate"].
             to_string().substr(0, 4);
         if (!pubyr.empty()) {
-          auto ttl = repair_string(doi_obj["search-results"]["entry"][n][
-              "dc:title"].to_string());
+          auto ttl = citefind::repair_string(doi_obj["search-results"]["entry"][
+              n]["dc:title"].to_string());
           auto publisher = author_obj["abstracts-retrieval-response"][
               "coredata"]["dc:publisher"].to_string();
           if (publisher.empty()) {
-            publisher = publisher_from_cross_ref(sdoi);
+            publisher = citefind::publisher_from_cross_ref(sdoi);
           }
           if (g_publisher_fixups.find(publisher) != g_publisher_fixups.end()) {
             publisher = g_publisher_fixups[publisher];
@@ -665,9 +336,9 @@ void query_elsevier(const DOI_LIST& doi_list, const citefind::SERVICE_DATA&
     }
   }
   if (g_args.doi_group.id == "rda") {
-    regenerate_dataset_descriptions(get<0>(service_data));
+    citefind::regenerate_dataset_descriptions(get<0>(service_data));
   }
-  reset_new_flag();
+  citefind::reset_new_flag();
 }
 
 tuple<string, string> parse_author_first_name(string fname) {
@@ -732,7 +403,7 @@ void fill_authors_from_wos(string doi_work, const JSON::Value& v) {
   }
 }
 
-void query_wos(const DOI_LIST& doi_list, const citefind::SERVICE_DATA&
+void query_wos(const citefind::DOI_LIST& doi_list, const citefind::SERVICE_DATA&
     service_data) {
 //return;
   static const string API_URL = get<2>(service_data);
@@ -919,9 +590,9 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
     }
   }
   if (g_args.doi_group.id == "rda") {
-    regenerate_dataset_descriptions(get<0>(service_data));
+    citefind::regenerate_dataset_descriptions(get<0>(service_data));
   }
-  reset_new_flag();
+  citefind::reset_new_flag();
 }
 
 void clean_cache() {
@@ -977,7 +648,7 @@ void fill_publisher_fixups() {
   }
 }
 
-void fill_doi_list_from_db(DOI_LIST& doi_list) {
+void fill_doi_list_from_db(citefind::DOI_LIST& doi_list) {
   g_output << "    filling list from a database ..." << endl;
   LocalQuery q(g_args.doi_group.doi_query.db_query);
   if (q.submit(g_server) < 0) {
@@ -1016,7 +687,7 @@ void process_json_value(const JSON::Value& v, deque<string> sp, vector<string>&
   }
 }
 
-void fill_doi_list_from_api(DOI_LIST& doi_list) {
+void fill_doi_list_from_api(citefind::DOI_LIST& doi_list) {
   if (g_args.doi_group.doi_query.api_data.response.doi_path.empty()) {
     citefind::add_to_error_and_exit("not configured to handle an API response");
   }
@@ -1091,7 +762,7 @@ void fill_doi_list_from_api(DOI_LIST& doi_list) {
   g_output << "    ... found " << doi_list.size() << " DOIs." << endl;
 }
 
-void fill_doi_list(DOI_LIST& doi_list) {
+void fill_doi_list(citefind::DOI_LIST& doi_list) {
   g_output << "Filling list of DOIs for '" << g_args.doi_group.id << "' ..." <<
       endl;
   if (!g_single_doi.empty()) {
@@ -1109,10 +780,10 @@ void fill_doi_list(DOI_LIST& doi_list) {
 }
 
 void query_service(string service_id, const citefind::SERVICE_DATA&
-    service_data, const DOI_LIST& doi_list) {
+    service_data, const citefind::DOI_LIST& doi_list) {
   g_output << "Querying " << get<0>(service_data) << " ..." << endl;
   if (service_id == "crossref") {
-    query_crossref(doi_list, service_data);
+    citefind::query_crossref(doi_list, service_data);
   } else if (service_id == "elsevier") {
     query_elsevier(doi_list, service_data);
   } else if (service_id == "wos") {
@@ -1147,7 +818,7 @@ int main(int argc, char **argv) {
   fill_journal_abbreviations();
   fill_journals_no_abbreviation();
   fill_publisher_fixups();
-  DOI_LIST doi_list;
+  citefind::DOI_LIST doi_list;
   fill_doi_list(doi_list);
   for (const auto& e : g_services) {
     if (get<4>(e.second)) {
