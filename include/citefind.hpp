@@ -61,6 +61,7 @@ extern void add_to_error_and_exit(std::string msg);
 extern void clean_up();
 extern void insert_source(std::string doi_work, std::string doi_data, std::
     string service);
+extern void parse_args(int argc, char **argv);
 extern void read_config();
 
 extern std::string convert_unicodes(std::string value);
