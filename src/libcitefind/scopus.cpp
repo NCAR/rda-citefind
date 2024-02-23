@@ -88,8 +88,8 @@ bool filled_authors_from_scopus(string scopus_url, string api_key, string
           "author"][m]["@seq"].to_string();
       auto lnam = author_obj["abstracts-retrieval-response"]["authors"][
           "author"][m]["ce:surname"].to_string();
-      if (!citefind::inserted_works_author(subj_doi, "DOI", fnam, mnam, lnam,
-          "", stoi(seq), "Scopus")) {
+      if (!inserted_works_author(subj_doi, "DOI", fnam, mnam, lnam, "", stoi(
+          seq), "Scopus")) {
         return false;
       }
     }
@@ -98,8 +98,8 @@ bool filled_authors_from_scopus(string scopus_url, string api_key, string
   return false;
 }
 
-void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
-    SERVICE_DATA& service_data) {
+void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
+    service_data) {
   const regex email_re("(.)*@(.)*\\.(.)*");
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
@@ -122,8 +122,7 @@ void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
       size_t num_tries = 0;
       for (; num_tries < 3; ++num_tries) {
         sleep_for(seconds(num_tries * 5));
-        citefind::get_citations(url, get<0>(service_data), 1, filename,
-            doi_obj);
+        get_citations(url, get<0>(service_data), 1, filename, doi_obj);
         if (doi_obj && doi_obj["service-error"].type() == JSON::ValueType::
             Nonexistent) {
           break;
@@ -168,11 +167,11 @@ void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
         auto sdoi = doi_obj["search-results"]["entry"][n]["prism:doi"].
             to_string();
         replace_all(sdoi, "\\/","/");
-        if (!citefind::inserted_citation(doi, sdoi, get<0>(service_data))) {
+        if (!inserted_citation(doi, sdoi, get<0>(service_data))) {
           continue;
         }
-        citefind::insert_source(sdoi, doi, get<0>(service_data));
-        if (!citefind::inserted_doi_data(doi, publisher, asset_type, get<0>(
+        insert_source(sdoi, doi, get<0>(service_data));
+        if (!inserted_doi_data(doi, publisher, asset_type, get<0>(
             service_data))) {
           continue;
         }
@@ -192,7 +191,7 @@ void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
         if (!filled_authors_from_scopus(scopus_url, get<3>(service_data), sdoi,
             author_obj)) {
           JSON::Object cr_obj;
-          citefind::filled_authors_from_cross_ref(sdoi, cr_obj);
+          filled_authors_from_cross_ref(sdoi, cr_obj);
         }
 
         // get the type of the "work" and add type-specific data
@@ -202,7 +201,7 @@ void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
           typ = "J";
           auto pubnam = doi_obj["search-results"]["entry"][n][
               "prism:publicationName"].to_string();
-          if (!citefind::inserted_journal_works_data(sdoi, pubnam, doi_obj[
+          if (!inserted_journal_works_data(sdoi, pubnam, doi_obj[
               "search-results"]["entry"][n]["prism:volume"].to_string(),
               doi_obj["search-results"]["entry"][n]["prism:pageRange"].
               to_string(), get<0>(service_data))) {
@@ -217,12 +216,12 @@ void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
                 "(DOI: " + sdoi + ")", "\n");
             continue;
           }
-          if (!citefind::inserted_book_chapter_works_data(sdoi, doi_obj[
-              "search-results"]["entry"][n]["prism:pageRange"].to_string(),
+          if (!inserted_book_chapter_works_data(sdoi, doi_obj["search-results"][
+              "entry"][n]["prism:pageRange"].to_string(),
               isbn, get<0>(service_data))) {
             continue;
           }
-          if (!citefind::inserted_book_data(isbn)) {
+          if (!inserted_book_data(isbn)) {
             append(myerror, "Error inserting ISBN '" + isbn + "' from Elsevier",
                 "\n");
             continue;
@@ -230,10 +229,9 @@ void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
         } else if (typ == "Conference Proceeding") {
           typ = "P";
           auto& e = doi_obj["search-results"]["entry"][n];
-          if (!citefind::inserted_proceedings_works_data(sdoi, e[
-              "prism:publicationName"].to_string(), e["prism:volume"].
-              to_string(), e["prism:pageRange"].to_string(), get<0>(
-              service_data))) {
+          if (!inserted_proceedings_works_data(sdoi, e["prism:publicationName"].
+              to_string(), e["prism:volume"].to_string(), e["prism:pageRange"].
+              to_string(), get<0>(service_data))) {
             continue;
           }
         } else {
@@ -246,12 +244,12 @@ void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
         auto pubyr = doi_obj["search-results"]["entry"][n]["prism:coverDate"].
             to_string().substr(0, 4);
         if (!pubyr.empty()) {
-          auto ttl = citefind::repair_string(doi_obj["search-results"]["entry"][
-              n]["dc:title"].to_string());
+          auto ttl = repair_string(doi_obj["search-results"]["entry"][n][
+              "dc:title"].to_string());
           auto publisher = author_obj["abstracts-retrieval-response"][
               "coredata"]["dc:publisher"].to_string();
           if (publisher.empty()) {
-            publisher = citefind::publisher_from_cross_ref(sdoi);
+            publisher = publisher_from_cross_ref(sdoi);
           }
           if (g_publisher_fixups.find(publisher) != g_publisher_fixups.end()) {
             publisher = g_publisher_fixups[publisher];
@@ -266,8 +264,8 @@ void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
               }
             }
           }
-          if (!citefind::inserted_general_works_data(sdoi, ttl, pubyr, typ,
-              publisher, get<0>(service_data), scopus_url)) {
+          if (!inserted_general_works_data(sdoi, ttl, pubyr, typ, publisher,
+              get<0>(service_data), scopus_url)) {
             continue;
           }
         } else {
@@ -278,9 +276,9 @@ void query_elsevier(const citefind::DOI_LIST& doi_list, const citefind::
     }
   }
   if (g_args.doi_group.id == "rda") {
-    citefind::regenerate_dataset_descriptions(get<0>(service_data));
+    regenerate_dataset_descriptions(get<0>(service_data));
   }
-  citefind::reset_new_flag();
+  reset_new_flag();
 }
 
 } // end namespace citefind
