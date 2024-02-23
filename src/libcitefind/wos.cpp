@@ -82,13 +82,12 @@ void fill_authors_from_wos(string doi_work, const JSON::Value& v) {
     }
   }
   for (const auto& name : author_names) {
-    citefind::inserted_works_author(doi_work, "DOI", get<0>(name), get<1>(name),
-        get<2>(name), get<3>(name), get<4>(name), "WoS");
+    inserted_works_author(doi_work, "DOI", get<0>(name), get<1>(name), get<2>(
+        name), get<3>(name), get<4>(name), "WoS");
   }
 }
 
-void query_wos(const citefind::DOI_LIST& doi_list, const citefind::SERVICE_DATA&
-    service_data) {
+void query_wos(const DOI_LIST& doi_list, const SERVICE_DATA& service_data) {
 //return;
   static const string API_URL = get<2>(service_data);
   static const string API_KEY_HEADER = "X-ApiKey: " + get<3>(service_data);
@@ -192,11 +191,11 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
       }
       g_output << "        WoS ID: '" << work_id << "', DOI: '" << doi_work <<
           "'" << endl;
-      if (!citefind::inserted_citation(doi, doi_work, get<0>(service_data))) {
+      if (!inserted_citation(doi, doi_work, get<0>(service_data))) {
         continue;
       }
-      citefind::insert_source(doi_work, doi, get<0>(service_data));
-      if (!citefind::inserted_doi_data(doi, publisher, asset_type, get<0>(
+      insert_source(doi_work, doi, get<0>(service_data));
+      if (!inserted_doi_data(doi, publisher, asset_type, get<0>(
           service_data))) {
         continue;
       }
@@ -237,8 +236,8 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
         if (!issue.empty()) {
           vol += "(" + issue + ")";
         }
-        if (!citefind::inserted_journal_works_data(doi_work, pubnam, vol,
-            pub_info["page"]["content"].to_string(), get<0>(service_data))) {
+        if (!inserted_journal_works_data(doi_work, pubnam, vol, pub_info[
+            "page"]["content"].to_string(), get<0>(service_data))) {
           continue;
         }
       } else {
@@ -264,8 +263,8 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
           append(myerror, "**NO WoS PUBLISHER (" + work_id + ")", "\n");
           continue;
         }
-        if (!citefind::inserted_general_works_data(doi_work, item_title, pubyr,
-            pubtype, publisher, get<0>(service_data), work_id)) {
+        if (!inserted_general_works_data(doi_work, item_title, pubyr, pubtype,
+            publisher, get<0>(service_data), work_id)) {
           continue;
         }
       } else {
@@ -274,9 +273,9 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
     }
   }
   if (g_args.doi_group.id == "rda") {
-    citefind::regenerate_dataset_descriptions(get<0>(service_data));
+    regenerate_dataset_descriptions(get<0>(service_data));
   }
-  citefind::reset_new_flag();
+  reset_new_flag();
 }
 
 } // end namespace citefind
