@@ -149,4 +149,12 @@ void get_citations(string url, string service_id, size_t sleep, string
   ifs.close();
 }
 
+void clean_cache() {
+  stringstream oss, ess;
+  if (mysystem2("/bin/tcsh -c 'find " + g_config_data.tmpdir + "/cache/* "
+      "-mtime +180 -exec rm {} \\;'", oss, ess) != 0) {
+    add_to_error_and_exit("unable to clean cache - error: '" + ess.str() + "'");
+  }
+}
+
 } // end namespace citefind

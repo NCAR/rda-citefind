@@ -61,7 +61,9 @@ struct Args {
 };
 
 extern void add_to_error_and_exit(std::string msg);
+extern void clean_cache();
 extern void clean_up();
+extern void fill_doi_list(DOI_LIST& doi_list);
 extern void get_citations(std::string url, std::string service_id, size_t sleep,
     std::string filename, JSON::Object& doi_obj);
 extern void insert_source(std::string doi_work, std::string doi_data, std::
