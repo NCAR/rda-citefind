@@ -3,10 +3,12 @@
 #include <sys/stat.h>
 #include <regex>
 #include <thread>
+#include <PostgreSQL.hpp>
 #include <strutils.hpp>
 #include <utils.hpp>
 #include <myerror.hpp>
 
+using namespace PostgreSQL;
 using std::chrono::seconds;
 using std::endl;
 using std::get;
@@ -24,10 +26,21 @@ using unixutils::mysystem2;
 
 extern citefind::ConfigData g_config_data;
 extern citefind::Args g_args;
+extern Server g_server;
 extern std::ofstream g_output;
-extern unordered_map<string, string> g_publisher_fixups;
 
 namespace citefind {
+
+void fill_publisher_fixups(unordered_map<string, string>& publisher_fixups) {
+  LocalQuery q("original_name, fixup", "citation.publisher_fixups");
+  if (q.submit(g_server) < 0) {
+    citefind::add_to_error_and_exit("unable to get publisher fixups: '" + q.
+        error() + "'");
+  }
+  for (const auto& r : q) {
+    publisher_fixups.emplace(r[0], r[1]);
+  }
+}
 
 bool filled_authors_from_scopus(string scopus_url, string api_key, string
     subj_doi, JSON::Object& author_obj) {
@@ -101,6 +114,8 @@ bool filled_authors_from_scopus(string scopus_url, string api_key, string
 void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
     service_data) {
   const regex email_re("(.)*@(.)*\\.(.)*");
+  unordered_map<string, string> publisher_fixups;
+  fill_publisher_fixups(publisher_fixups);
   string doi, publisher, asset_type;
   for (const auto& e : doi_list) {
     tie(doi, publisher, asset_type) = e;
@@ -251,16 +266,15 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
           if (publisher.empty()) {
             publisher = publisher_from_cross_ref(sdoi);
           }
-          if (g_publisher_fixups.find(publisher) != g_publisher_fixups.end()) {
-            publisher = g_publisher_fixups[publisher];
+          if (publisher_fixups.find(publisher) != publisher_fixups.end()) {
+            publisher = publisher_fixups[publisher];
           } else {
             if (regex_search(publisher, email_re)) {
-              if (g_publisher_fixups.find(publisher) == g_publisher_fixups.
-                  end()) {
+              if (publisher_fixups.find(publisher) == publisher_fixups.end()) {
                 append(myerror, "**SUSPECT PUBLISHER: '" + publisher + "'",
                     "\n");
               } else {
-                publisher = g_publisher_fixups[publisher];
+                publisher = publisher_fixups[publisher];
               }
             }
           }

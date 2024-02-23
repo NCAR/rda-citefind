@@ -51,13 +51,15 @@ citefind::ConfigData g_config_data;
 citefind::Args g_args;
 Server g_server;
 stringstream g_myoutput, g_mail_message;
-unordered_map<string, string> g_journal_abbreviations, g_publisher_fixups;
-unordered_set<string> g_journals_no_abbreviation;
+//unordered_map<string, string> g_journal_abbreviations;
+unordered_map<string, string> g_publisher_fixups;
+//unordered_set<string> g_journals_no_abbreviation;
 std::ofstream g_output;
 string g_single_doi;
 
 unordered_map<string, citefind::SERVICE_DATA> g_services;
 
+/*
 string journal_abbreviation(string journal_name) {
   auto parts=split(journal_name);
   if (parts.size() == 1) {
@@ -86,6 +88,7 @@ string journal_abbreviation(string journal_name) {
   }
   return journal_name;
 }
+*/
 
 void clean_cache() {
   stringstream oss, ess;
@@ -107,6 +110,7 @@ void create_doi_table() {
   }
 }
 
+/*
 void fill_journal_abbreviations() {
   LocalQuery q("word, abbreviation", "citation.journal_abbreviations");
   if (q.submit(g_server) < 0) {
@@ -117,7 +121,9 @@ void fill_journal_abbreviations() {
     g_journal_abbreviations.emplace(r[0], r[1]);
   }
 }
+*/
 
+/*
 void fill_journals_no_abbreviation() {
   LocalQuery q("full_name", "citation.journal_no_abbreviation");
   if (q.submit(g_server) < 0) {
@@ -128,17 +134,7 @@ void fill_journals_no_abbreviation() {
     g_journals_no_abbreviation.emplace(r[0]);
   }
 }
-
-void fill_publisher_fixups() {
-  LocalQuery q("original_name, fixup", "citation.publisher_fixups");
-  if (q.submit(g_server) < 0) {
-    citefind::add_to_error_and_exit("unable to get publisher fixups: '" + q.
-        error() + "'");
-  }
-  for (const auto& r : q) {
-    g_publisher_fixups.emplace(r[0], r[1]);
-  }
-}
+*/
 
 void fill_doi_list_from_db(citefind::DOI_LIST& doi_list) {
   g_output << "    filling list from a database ..." << endl;
@@ -307,9 +303,8 @@ int main(int argc, char **argv) {
   clean_cache();
   citefind::parse_args(argc, argv);
   create_doi_table();
-  fill_journal_abbreviations();
-  fill_journals_no_abbreviation();
-  fill_publisher_fixups();
+//  fill_journal_abbreviations();
+//  fill_journals_no_abbreviation();
   citefind::DOI_LIST doi_list;
   fill_doi_list(doi_list);
   for (const auto& e : g_services) {
