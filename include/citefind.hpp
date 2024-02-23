@@ -71,6 +71,8 @@ extern void query_crossref(const DOI_LIST& doi_list, const SERVICE_DATA&
     service_data);
 extern void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
     service_data);
+extern void query_wos(const DOI_LIST& doi_list, const SERVICE_DATA&
+    service_data);
 extern void read_config();
 extern void regenerate_dataset_descriptions(std::string whence);
 extern void reset_new_flag();
