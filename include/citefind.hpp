@@ -78,6 +78,7 @@ extern void query_wos(const DOI_LIST& doi_list, const SERVICE_DATA&
 extern void read_config();
 extern void regenerate_dataset_descriptions(std::string whence);
 extern void reset_new_flag();
+extern void run_db_integrity_checks();
 
 extern std::string cache_file(std::string doi);
 extern std::string convert_unicodes(std::string value);

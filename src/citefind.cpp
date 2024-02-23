@@ -38,7 +38,6 @@ unordered_map<string, string> g_publisher_fixups;
 //unordered_set<string> g_journals_no_abbreviation;
 std::ofstream g_output;
 string g_single_doi;
-
 unordered_map<string, citefind::SERVICE_DATA> g_services;
 
 /*
@@ -124,21 +123,6 @@ void query_service(string service_id, const citefind::SERVICE_DATA&
   g_output << "... done querying " << get<0>(service_data) << "." << endl;
 }
 
-void print_publisher_list() {
-  LocalQuery q("distinct publisher", "citation.works");
-  if (q.submit(g_server) < 0) {
-    citefind::add_to_error_and_exit("unable to get list of pubishers from "
-        "'works' table: '" + q.error() + "'");
-  }
-  g_myoutput << "\nCurrent Publisher List:" << endl;
-  for (const auto& r : q) {
-    g_myoutput << "Publisher: '" << r[0] << "'" << endl;
-  }
-}
-
-void run_db_integrity_checks() {
-}
-
 int main(int argc, char **argv) {
   atexit(citefind::clean_up);
   citefind::read_config();
@@ -155,8 +139,7 @@ int main(int argc, char **argv) {
       query_service(e.first, e.second, doi_list);
     }
   }
-  print_publisher_list();
-  run_db_integrity_checks();
+  citefind::run_db_integrity_checks();
   g_server.disconnect();
   g_output.close();
   exit(0);
