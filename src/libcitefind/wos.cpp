@@ -189,7 +189,8 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
       }
       g_output << "        WoS ID: '" << work_id << "', DOI: '" << doi_work <<
           "'" << endl;
-      if (!inserted_citation(doi, doi_work, get<0>(service_data))) {
+      if (!inserted_citation(doi, doi_work, get<0>(service_data), g_args.
+          doi_group.insert_table)) {
         continue;
       }
       insert_source(doi_work, doi, get<0>(service_data));

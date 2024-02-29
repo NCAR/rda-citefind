@@ -118,7 +118,8 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
       replace_all(sid, "\\/", "/");
       auto sp = split(sid, "doi.org/");
       auto sdoi = sp.back();
-      if (!inserted_citation(doi, sdoi, get<0>(service_data))) {
+      if (!inserted_citation(doi, sdoi, get<0>(service_data), g_args.doi_group.
+          insert_table)) {
         continue;
       }
       insert_source(sdoi, doi, get<0>(service_data));

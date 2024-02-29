@@ -22,7 +22,6 @@ using strutils::sql_ready;
 using strutils::substitute;
 using unixutils::mysystem2;
 
-extern citefind::Args g_args;
 extern Server g_server;
 extern std::ofstream g_output;
 
@@ -206,9 +205,10 @@ bool inserted_proceedings_works_data(string doi, string pub_name, string volume,
   return true;
 }
 
-bool inserted_citation(string doi, string doi_work, string service) {
+bool inserted_citation(string doi, string doi_work, string service, string
+    insert_table) {
   if (g_server.insert(
-        g_args.doi_group.insert_table,
+        insert_table,
         "doi_data, doi_work, new_flag",
         "'" + doi + "', '" + doi_work + "', '1'",
         "(doi_data, doi_work) do nothing"

@@ -97,7 +97,7 @@ extern bool inserted_book_works_data(std::string isbn, std::string title, std::
 extern bool inserted_book_chapter_works_data(std::string doi, std::string pages,
     std::string isbn, std::string service);
 extern bool inserted_citation(std::string doi, std::string doi_work, std::string
-    service);
+    service, std::string insert_table);
 extern bool inserted_doi_data(std::string doi, std::string publisher, std::
     string asset_type, std::string service);
 extern bool inserted_general_works_data(std::string doi, std::string title,

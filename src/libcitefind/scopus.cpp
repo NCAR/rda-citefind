@@ -180,7 +180,8 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
         auto sdoi = doi_obj["search-results"]["entry"][n]["prism:doi"].
             to_string();
         replace_all(sdoi, "\\/","/");
-        if (!inserted_citation(doi, sdoi, get<0>(service_data))) {
+        if (!inserted_citation(doi, sdoi, get<0>(service_data), g_args.
+            doi_group.insert_table)) {
           continue;
         }
         insert_source(sdoi, doi, get<0>(service_data));
