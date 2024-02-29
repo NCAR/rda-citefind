@@ -234,7 +234,7 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
               isbn, get<0>(service_data))) {
             continue;
           }
-          if (!inserted_book_data(isbn)) {
+          if (!inserted_book_data(isbn, g_config_data.tmpdir)) {
             g_output << "Error inserting ISBN '" << isbn << "' from Elsevier" <<
                 endl;
             continue;

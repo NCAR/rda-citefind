@@ -87,9 +87,11 @@ extern std::string repair_string(std::string s);
 
 extern bool filled_authors_from_cross_ref(std::string subj_doi, JSON::Object&
     obj);
-extern bool inserted_book_data(std::string isbn);
-extern bool inserted_book_data_from_google(std::string isbn);
-extern bool inserted_book_data_from_openlibrary(std::string isbn);
+extern bool inserted_book_data(std::string isbn, std::string tmpdir);
+extern bool inserted_book_data_from_google(std::string isbn, std::string
+    tmpdir);
+extern bool inserted_book_data_from_openlibrary(std::string isbn, std::string
+    tmpdir);
 extern bool inserted_book_works_data(std::string isbn, std::string title, std::
     string publisher, std::string service);
 extern bool inserted_book_chapter_works_data(std::string doi, std::string pages,

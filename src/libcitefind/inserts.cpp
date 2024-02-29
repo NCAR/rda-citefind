@@ -22,7 +22,6 @@ using strutils::sql_ready;
 using strutils::substitute;
 using unixutils::mysystem2;
 
-extern citefind::ConfigData g_config_data;
 extern citefind::Args g_args;
 extern Server g_server;
 extern std::ofstream g_output;
@@ -253,8 +252,8 @@ bool inserted_doi_data(string doi, string publisher, string asset_type, string
   return true;
 }
 
-bool inserted_book_data_from_google(string isbn) {
-  auto fn_isbn = g_config_data.tmpdir + "/cache/" + isbn + ".google.json";
+bool inserted_book_data_from_google(string isbn, string tmpdir) {
+  auto fn_isbn = tmpdir + "/cache/" + isbn + ".google.json";
   struct stat buf;
   if (stat(fn_isbn.c_str(), &buf) != 0) {
     sleep_for(seconds(1));
@@ -307,8 +306,8 @@ bool inserted_book_data_from_google(string isbn) {
       "publisher"].to_string(), "Google Books");
 }
 
-bool inserted_book_data_from_openlibrary(string isbn) {
-  auto fn_isbn = g_config_data.tmpdir + "/cache/" + isbn + ".openlibrary.json";
+bool inserted_book_data_from_openlibrary(string isbn, string tmpdir) {
+  auto fn_isbn = tmpdir + "/cache/" + isbn + ".openlibrary.json";
   struct stat buf;
   if (stat(fn_isbn.c_str(), &buf) != 0) {
     sleep_for(seconds(1));
@@ -361,10 +360,10 @@ bool inserted_book_data_from_openlibrary(string isbn) {
       "Open Library");
 }
 
-bool inserted_book_data(string isbn) {
-  auto b = inserted_book_data_from_google(isbn);
+bool inserted_book_data(string isbn, string tmpdir) {
+  auto b = inserted_book_data_from_google(isbn, tmpdir);
   if (!b) {
-    b = inserted_book_data_from_openlibrary(isbn);
+    b = inserted_book_data_from_openlibrary(isbn, tmpdir);
   }
   return b;
 }

@@ -166,7 +166,7 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
             to_string(), isbn, get<0>(service_data))) {
           continue;
         }
-        if (!inserted_book_data(isbn)) {
+        if (!inserted_book_data(isbn, g_config_data.tmpdir)) {
           g_output << "Error inserting ISBN '" << isbn << "' from CrossRef" <<
               endl;
           continue;
