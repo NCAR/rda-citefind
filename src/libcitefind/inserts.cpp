@@ -10,6 +10,7 @@
 
 using namespace PostgreSQL;
 using std::chrono::seconds;
+using std::endl;
 using std::ifstream;
 using std::this_thread::sleep_for;
 using std::string;
@@ -24,6 +25,7 @@ using unixutils::mysystem2;
 extern citefind::ConfigData g_config_data;
 extern citefind::Args g_args;
 extern Server g_server;
+extern std::ofstream g_output;
 
 namespace citefind {
 
@@ -61,14 +63,34 @@ bool inserted_works_author(string pid, string pid_type, string first_name,
   );
   if (status != 0) {
     if (status == -2) {
-      append(myerror, "-##-DUPLICATE AUTHOR (" + whence + "): " + pid_type +
-          ": " + pid + ", last=" + last_name + ", first=" + first_name + ", "
-          "middle=" + middle_name + ", sequence=" + to_string(sequence), "\n");
+      LocalQuery q("last_name, first_name, middle_name, orcid_id", "citation."
+          "works_authors", "id = '" + pid + "' and id_type = '" + pid_type +
+          "and sequence = " + to_string(sequence));
+      if (q.submit(g_server) != 0) {
+        append(myerror, "Query error on duplicate author check: '" + q.error() +
+            "'", "\n");
+      } else {
+         Row row;
+         if (!q.fetch_row(row)) {
+           append(myerror, "Row fetch error on duplicate author check: '" + q.
+               error() + "'", "\n");
+         } else {
+           if (row[0] != last_name || row[1] != first_name || row[2] !=
+               middle_name || row[3] != orcid_id) {
+             g_output << "-##-DUPLICATE AUTHOR MISMATCH (" << whence << "): "
+                 << pid_type << ": " << pid << ", last=('" << row[0] << "','" <<
+                 last_name << "'), first=('" << row[1] << "','" << first_name <<
+                 "'), middle=('" << row[2] << "','" << middle_name << "'), "
+                 "orcid_id=('" << row[3] << "','" << orcid_id << "'), sequence="
+                 << to_string(sequence) << endl;
+           }
+         }
+      }
     } else {
-      append(myerror, "Error while inserting author (" + pid + "," + pid_type +
-          "," + last_name + "," + first_name + "," + middle_name + "," +
-          to_string(sequence) + "," + orcid_id + "): '" + g_server.error() +
-          "' from " + whence, "\n");
+      g_output << "Error while inserting author (" << pid << "," << pid_type << 
+          "," << last_name << "," << first_name << "," << middle_name << "," << 
+          to_string(sequence) << "," << orcid_id << "): '" << g_server.error()
+          << "' from " << whence << endl;
       return false;
     }
   }
@@ -88,9 +110,9 @@ bool inserted_general_works_data(string doi, string title, string pub_year,
             "publisher) > length(works.publisher) then excluded.publisher "
             "else works.publisher end"
         ) < 0) {
-    append(myerror, "Error while inserting " + service + "(" + service_id + ") "
-        "work (" + doi + "," + title + "," + pub_year + "," + works_type + "," +
-        publisher + "): '" + g_server.error() + "'", "\n");
+    g_output << "Error while inserting " << service << "(" << service_id << ") "
+        "work (" << doi << "," << title << "," << pub_year << "," << works_type
+        << "," << publisher << "): '" << g_server.error() << "'" << endl;
     return false;
   }
   return true;
@@ -108,8 +130,9 @@ bool inserted_book_works_data(string isbn, string title, string publisher,
             "publisher) > length(book_works.publisher) then excluded.publisher "
             "else book_works.publisher end"
         ) < 0) {
-    append(myerror, "Error while inserting " + service + " book data (" + isbn +
-        "," + title + "," + publisher + "): '" + g_server.error() + "'", "\n");
+    g_output << "Error while inserting " << service << " book data (" << isbn <<
+        "," << title << "," << publisher << "): '" << g_server.error() << "'" <<
+        endl;
     return false;
   }
   return true;
@@ -128,9 +151,9 @@ bool inserted_book_chapter_works_data(string doi, string pages, string isbn,
             "excluded.isbn) > length(book_chapter_works.isbn) then "
             "excluded.isbn else book_chapter_works.isbn end"
         ) < 0) {
-    append(myerror, "Error while inserting " + service + " book chapter data ("
-        + doi + "," + pages + "," + isbn + "): '" + g_server.error() + "'",
-        "\n");
+    g_output << "Error while inserting " << service << " book chapter data (" <<
+        doi << "," << pages << "," << isbn << "): '" << g_server.error() << "'"
+        << endl;
     return false;
   }
   return true;
@@ -152,9 +175,9 @@ bool inserted_journal_works_data(string doi, string pub_name, string volume,
             "pages) > length(journal_works.pages) then excluded.pages "
             "else journal_works.pages end"
         ) < 0) {
-    append(myerror, "Error while inserting " + service + " journal data (" + doi
-        + "," + pub_name + "," + volume + "," + pages + "): '" + g_server.
-        error() + "'", "\n");
+    g_output << "Error while inserting " << service << " journal data (" << doi
+        << "," << pub_name << "," << volume << "," << pages << "): '" <<
+        g_server.error() << "'" << endl;
     return false;
   }
   return true;
@@ -176,9 +199,9 @@ bool inserted_proceedings_works_data(string doi, string pub_name, string volume,
             "case when length(excluded.pages) > length(proceedings_works."
             "pages) then excluded.pages else proceedings_works.pages end"
         ) < 0) {
-    append(myerror, "Error while inserting " + service + " proceedings data (" +
-        doi + ", " + pub_name + ", " + volume + ", " + pages + "): '" +
-        g_server.error() + "'", "\n");
+    g_output << "Error while inserting " << service << " proceedings data (" <<
+        doi << ", " << pub_name << ", " << volume << ", " << pages << "): '" <<
+        g_server.error() << "'" << endl;
     return false;
   }
   return true;
@@ -191,8 +214,8 @@ bool inserted_citation(string doi, string doi_work, string service) {
         "'" + doi + "', '" + doi_work + "', '1'",
         "(doi_data, doi_work) do nothing"
         ) < 0) {
-    append(myerror, "Error while inserting " + service + " citation (" + doi +
-        ", " + doi_work + "): '" + g_server.error() + "'", "\n");
+    g_output << "Error while inserting " << service << " citation (" << doi <<
+        ", " << doi_work << "): '" << g_server.error() << "'" << endl;
     return false;
   }
   return true;
@@ -205,8 +228,8 @@ void insert_source(string doi_work, string doi_data, string service) {
       "'" + doi_work + "', '" + doi_data + "', '" + service + "'",
       "on constraint sources_pkey do nothing"
       ) < 0) {
-    append(myerror, "Error updating " + service + " source for '" + doi_work +
-        "', '" + doi_data + "'", "\n");
+    g_output << "Error updating " << service << " source for '" << doi_work <<
+        "', '" << doi_data << "'" << endl;
   }
 }
 
@@ -222,9 +245,9 @@ bool inserted_doi_data(string doi, string publisher, string asset_type, string
             "when length(excluded.asset_type) > length(doi_data.asset_type) "
             "then excluded.asset_type else doi_data.asset_type end"
         ) < 0) {
-    append(myerror, "Error updating " + service + " DOI data (" + doi + ", " +
-        publisher + ", " + asset_type + "): '" + g_server.error() + "'",
-        "\n");
+    g_output << "Error updating " << service << " DOI data (" << doi << ", " <<
+        publisher << ", " << asset_type << "): '" << g_server.error() << "'" <<
+        endl;
     return false;
   }
   return true;
@@ -239,7 +262,8 @@ bool inserted_book_data_from_google(string isbn) {
     mysystem2("/bin/tcsh -c \"curl -s -o " + fn_isbn + " 'https://"
         "www.googleapis.com/books/v1/volumes?q=isbn:" + isbn + "'\"", oss, ess);
     if (!ess.str().empty()) {
-      append(myerror, "Error retrieving book data from Google", "\n");
+      g_output << "Error retrieving book data from Google for ISBN '" << isbn <<
+          "'" << endl;
       return false;
     }
   }
@@ -247,13 +271,15 @@ bool inserted_book_data_from_google(string isbn) {
   auto e = myerror;
   JSON::Object isbn_obj(ifs);
   if (!isbn_obj) {
-    myerror = e + "\nError reading JSON : '" + myerror + "'";
+    g_output << "Error reading Google JSON for ISBN '" << isbn << "' : '" <<
+        myerror << "'" << endl;
     stringstream oss, ess;
     mysystem2("/bin/rm " + fn_isbn, oss, ess);
     return false;
   }
+  myerror = e;
   if (isbn_obj["items"][0]["volumeInfo"]["authors"].size() == 0) {
-    append(myerror, "Empty Google data for ISBN : '" + isbn + "'", "\n");
+    g_output << "Empty Google data for ISBN : '" << isbn << "'" << endl;
     return false;
   }
   for (size_t m = 0; m < isbn_obj["items"][0]["volumeInfo"]["authors"].size();
@@ -291,7 +317,8 @@ bool inserted_book_data_from_openlibrary(string isbn) {
         "openlibrary.org/api/books?bibkeys=ISBN:" + isbn + "&jscmd="
         "details&format=json'\"", oss, ess);
     if (!ess.str().empty()) {
-      append(myerror, "Error retrieving book data from Open Library", "\n");
+      g_output << "Error retrieving book data from Open Library for ISBN '" <<
+          isbn << "'" << endl;
       return false;
     }
   }
@@ -301,13 +328,15 @@ bool inserted_book_data_from_openlibrary(string isbn) {
   if (!isbn_obj) {
     stringstream oss, ess;
     mysystem2("/bin/rm " + fn_isbn, oss, ess);
-    myerror = e + "\nError reading JSON : '" + myerror + "'";
+    g_output << "Error reading Open Library JSON for ISBN '" << isbn << "' : '"
+        << myerror << "'" << endl;
     return false;
   }
+  myerror = e;
   auto o = isbn_obj["ISBN:" + isbn]["details"];
   auto oa = o["authors"];
   if (oa.size() == 0) {
-    append(myerror, "Empty Google data for ISBN : '" + isbn + "'", "\n");
+    g_output << "Empty Open Library data for ISBN : '" << isbn << "'" << endl;
     return false;
   }
   for (size_t m = 0; m < oa.size(); ++m) {

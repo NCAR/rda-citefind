@@ -6,7 +6,6 @@
 #include <PostgreSQL.hpp>
 #include <strutils.hpp>
 #include <utils.hpp>
-#include <myerror.hpp>
 
 using namespace PostgreSQL;
 using std::chrono::seconds;
@@ -34,8 +33,8 @@ namespace citefind {
 void fill_publisher_fixups(unordered_map<string, string>& publisher_fixups) {
   LocalQuery q("original_name, fixup", "citation.publisher_fixups");
   if (q.submit(g_server) < 0) {
-    citefind::add_to_error_and_exit("unable to get publisher fixups: '" + q.
-        error() + "'");
+    add_to_error_and_exit("unable to get publisher fixups: '" + q.error() +
+        "'");
   }
   for (const auto& r : q) {
     publisher_fixups.emplace(r[0], r[1]);
@@ -57,8 +56,8 @@ bool filled_authors_from_scopus(string scopus_url, string api_key, string
     mysystem2("/bin/tcsh -c \"curl -s -o " + authfil + " '" + url + "'\"", oss,
         ess);
     if (!ess.str().empty()) {
-      append(myerror, "Error while getting Elsevier author data for scopus ID '"
-          + scopus_id + "': '" + ess.str() + "'", "\n");
+      g_output << "Error while getting Elsevier author data for scopus ID '" <<
+          scopus_id << "': '" << ess.str() << "'" << endl;
       return false;
     }
   }
@@ -66,15 +65,14 @@ bool filled_authors_from_scopus(string scopus_url, string api_key, string
   try {
     author_obj.fill(ifs);
   } catch(...) {
-    append(myerror, "unable to create JSON object from '" + authfil + "'",
-        "\n");
+    g_output << "unable to create JSON object from '" << authfil << "'" << endl;
     return false;
   }
   ifs.close();
   if (!author_obj) {
-    append(myerror, "Error reading Elsevier JSON for scopus id '" + scopus_id +
-        "': 'unable to create JSON object'\n/bin/tcsh -c \"curl -o " + authfil +
-        " '" + url + "'\"", "\n");
+    g_output << "Error reading Elsevier JSON for scopus id '" << scopus_id<< 
+        "': 'unable to create JSON object'\n/bin/tcsh -c \"curl -o " << authfil
+        << " '" << url << "'\"" << endl;
     return false;
   }
   if (author_obj["abstracts-retrieval-response"]["authors"]["author"].size() >
@@ -147,19 +145,19 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
         }
       }
       if (num_tries == 3) {
-        append(myerror, "Error reading Elsevier JSON for DOI '" + doi + "': '"
-            "unable to create JSON object'\n/bin/tcsh -c \"curl -o " + filename
-            + " '" + url + "'\"", "\n");
+        g_output << "Error reading Elsevier JSON for DOI '" << doi << "': '"
+            "unable to create JSON object'\n/bin/tcsh -c \"curl -o " << filename
+            << " '" << url << "'\"" << endl;
         continue;
       }
       try {
         totres = stoi(doi_obj["search-results"]["opensearch:totalResults"].
             to_string());
       } catch (const std::invalid_argument& e) {
-        append(myerror, "invalid JSON for '" + url + "'", "\n");
+        g_output << "invalid JSON for '" << url << "'" << endl;
         continue;
       } catch (...) {
-        append(myerror, "unknown error in JSON for '" + url + "'", "\n");
+        g_output << "unknown error in JSON for '" << url << "'" << endl;
         continue;
       }
       pgnum += stoi(doi_obj["search-results"]["opensearch:itemsPerPage"].
@@ -172,11 +170,11 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
         // get the "works" DOI
         if (doi_obj["search-results"]["entry"][n]["prism:doi"].type() == JSON::
             ValueType::Nonexistent) {
-          append(myerror, "**NO Elsevier WORKS DOI:  Data DOI - " + doi +
-              "  type - " + doi_obj["search-results"]["entry"][n][
-              "prism:aggregationType"].to_string() + "  title - '" + doi_obj[
-              "search-results"]["entry"][n]["dc:title"].to_string() + "'",
-              "\n");
+          g_output << "**NO Elsevier WORKS DOI:  Data DOI - " << doi<< 
+              "  type - " << doi_obj["search-results"]["entry"][n][
+              "prism:aggregationType"].to_string() << "  title - '" << doi_obj[
+              "search-results"]["entry"][n]["dc:title"].to_string() << "'" <<
+              endl;
           continue;
         }
         auto sdoi = doi_obj["search-results"]["entry"][n]["prism:doi"].
@@ -197,8 +195,8 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
         // add the author data for the citing "work"
         auto prism_url = doi_obj["search-results"]["entry"][n]["prism:url"];
         if (prism_url.type() == JSON::ValueType::Nonexistent) {
-          append(myerror, "**NO Elsevier SCOPUS ID: " + filename + " " +
-              prism_url.to_string(), "\n");
+          g_output << "**NO Elsevier SCOPUS ID: " << filename << " " << 
+              prism_url.to_string() << endl;
           continue;
         }
         auto scopus_url = prism_url.to_string();
@@ -227,8 +225,8 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
           auto isbn = doi_obj["search-results"]["entry"][n]["prism:isbn"][0][
               "$"].to_string();
           if (isbn.empty()) {
-            append(myerror, "Error obtaining Elsevier ISBN for book chapter "
-                "(DOI: " + sdoi + ")", "\n");
+            g_output << "Error obtaining Elsevier ISBN for book chapter (DOI: "
+                << sdoi << ")" << endl;
             continue;
           }
           if (!inserted_book_chapter_works_data(sdoi, doi_obj["search-results"][
@@ -237,8 +235,8 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
             continue;
           }
           if (!inserted_book_data(isbn)) {
-            append(myerror, "Error inserting ISBN '" + isbn + "' from Elsevier",
-                "\n");
+            g_output << "Error inserting ISBN '" << isbn << "' from Elsevier" <<
+                endl;
             continue;
           }
         } else if (typ == "Conference Proceeding") {
@@ -250,8 +248,8 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
             continue;
           }
         } else {
-          append(myerror, "**UNKNOWN Elsevier TYPE: " + typ + " for work DOI: '"
-              + sdoi + "' citing '" + doi + "'", "\n");
+          g_output << "**UNKNOWN Elsevier TYPE: " << typ << " for work DOI: '"
+              << sdoi << "' citing '" << doi << "'" << endl;
           continue;
         }
 
@@ -271,8 +269,8 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
           } else {
             if (regex_search(publisher, email_re)) {
               if (publisher_fixups.find(publisher) == publisher_fixups.end()) {
-                append(myerror, "**SUSPECT PUBLISHER: '" + publisher + "'",
-                    "\n");
+                g_output << "**SUSPECT PUBLISHER: '" << publisher << "'" <<
+                    endl;
               } else {
                 publisher = publisher_fixups[publisher];
               }
@@ -283,8 +281,8 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
             continue;
           }
         } else {
-          append(myerror, "**NO Elsevier PUBLICATION YEAR: SCOPUS URL - " +
-              scopus_url, "\n");
+          g_output << "**NO Elsevier PUBLICATION YEAR: SCOPUS URL - " << 
+              scopus_url << endl;
         }
       }
     }

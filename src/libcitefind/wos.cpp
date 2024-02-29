@@ -3,7 +3,6 @@
 #include <sys/stat.h>
 #include <strutils.hpp>
 #include <utils.hpp>
-#include <myerror.hpp>
 
 using std::endl;
 using std::get;
@@ -106,13 +105,12 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
     if (mysystem2("/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL
         + "/?databaseId=DCI&usrQuery=DO=" + doi + "&count=1&firstRecord=1&"
         "viewField=none'\"", oss, ess) < 0) {
-      append(myerror, "Error getting WoS ID for DOI '" + doi + "'", "\n");
+      g_output << "Error getting WoS ID for DOI '" << doi << "'" << endl;
       continue;
     }
     JSON::Object o(oss.str());
     if (!o) {
-      append(myerror, "Wos response for DOI '" + doi + "' ID is not JSON",
-          "\n");
+      g_output << "Wos response for DOI '" << doi << "' ID is not JSON" << endl;
       continue;
     }
     auto wos_id = o["Data"]["Records"]["records"]["REC"][0]["UID"].to_string();
@@ -132,8 +130,8 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
           API_URL + "/citing?databaseId=WOS&uniqueId=" + wos_id + "&count=" +
           to_string(count) + "&firstRecord=" + to_string(first_rec) +
           "&viewField='\"", oss, ess) < 0) {
-        append(myerror, "Error getting WoS citation IDs for DOI '" + doi + "'",
-            "\n");
+        g_output << "Error getting WoS citation IDs for DOI '" << doi << "'" <<
+            endl;
         continue;
       }
       o.fill(oss.str());
@@ -162,16 +160,16 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
             cache_fn + " '" + API_URL + "/id/" + work_id + "?databaseId=WOS&"
             "count=1&firstRecord=1&viewField=" + view_field + "'\"", oss, ess) <
             0) {
-          append(myerror, "Error get WoS work data for ID '" + work_id + "' "
-              "(DOI " + doi + ")", "\n");
+          g_output << "Error get WoS work data for ID '" << work_id << "' (DOI "
+              << doi << ")" << endl;
           continue;
         }
       }
       ifstream ifs(cache_fn.c_str());
       o.fill(ifs);
       if (!o) {
-        append(myerror, "Error - '" + cache_fn + "' is not a JSON file (DOI " +
-            doi + ")", "\n");
+        g_output << "Error - '" << cache_fn << "' is not a JSON file (DOI " << 
+            doi << ")" << endl;
         continue;
       }
       auto& record = o["Data"]["Records"]["records"]["REC"][0];
@@ -185,8 +183,8 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
         }
       }
       if (doi_work.empty()) {
-        append(myerror, "Missing work DOI for WoS ID '" + work_id + "' (DOI " +
-            doi + ")", "\n");
+        g_output << "Missing work DOI for WoS ID '" << work_id << "' (DOI " << 
+            doi << ")" << endl;
         continue;
       }
       g_output << "        WoS ID: '" << work_id << "', DOI: '" << doi_work <<
@@ -227,8 +225,8 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
           }
         }
         if (pubnam.empty()) {
-          append(myerror, "Unable to find WoS publication name (" + work_id +
-              ")", "\n");
+          g_output << "Unable to find WoS publication name (" << work_id << ")"
+              << endl;
           continue;
         }
         auto vol = pub_info["vol"].to_string();
@@ -241,13 +239,12 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
           continue;
         }
       } else {
-        append(myerror, "Unknown WoS pubtype '" + pubtype + "' (" + work_id +
-            ")", "\n");
+        g_output << "Unknown WoS pubtype '" << pubtype << "' (" << work_id << 
+            ")" << endl;
         continue;
       }
       if (item_title.empty()) {
-        append(myerror, "Unable to find WoS item title (" + work_id + ")",
-            "\n");
+        g_output << "Unable to find WoS item title (" << work_id << ")" << endl;
         continue;
       }
 
@@ -260,7 +257,7 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
           publisher = to_title(p["full_name"].to_string());
         }
         if (publisher.empty()) {
-          append(myerror, "**NO WoS PUBLISHER (" + work_id + ")", "\n");
+          g_output << "**NO WoS PUBLISHER (" << work_id << ")" << endl;
           continue;
         }
         if (!inserted_general_works_data(doi_work, item_title, pubyr, pubtype,
@@ -268,7 +265,7 @@ std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?
           continue;
         }
       } else {
-        append(myerror, "**NO WoS PUBLICATION YEAR (" + work_id + ")", "\n");
+        g_output << "**NO WoS PUBLICATION YEAR (" << work_id << ")" << endl;
       }
     }
   }

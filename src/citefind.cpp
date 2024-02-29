@@ -29,10 +29,11 @@ using unixutils::mysystem2;
 
 string myerror = "";
 string mywarning = "";
+string myoutput = "";
 citefind::ConfigData g_config_data;
 citefind::Args g_args;
 Server g_server;
-stringstream g_myoutput, g_mail_message;
+stringstream g_mail_message;
 //unordered_map<string, string> g_journal_abbreviations;
 unordered_map<string, string> g_publisher_fixups;
 //unordered_set<string> g_journals_no_abbreviation;

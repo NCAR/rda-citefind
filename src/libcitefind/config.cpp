@@ -6,12 +6,15 @@
 #include <strutils.hpp>
 #include <json.hpp>
 #include <datetime.hpp>
+#include <myerror.hpp>
 
 using namespace PostgreSQL;
 using std::endl;
 using std::string;
+using std::stringstream;
 using std::to_string;
 using std::unordered_map;
+using strutils::append;
 using strutils::replace_all;
 
 extern Server g_server;
@@ -62,9 +65,11 @@ void read_config() {
   if (!g_server) {
     add_to_error_and_exit("unable to connect to the database");
   }
-  g_output.open(g_config_data.tmpdir + "/output." + dateutils::
-      current_date_time().to_string("%Y%m%d%H%MM"));
+  auto output_name = g_config_data.tmpdir + "/output." + dateutils::
+      current_date_time().to_string("%Y%m%d%H%MM");
+  g_output.open(output_name);
   g_output << "Configuration file open and ready to parse ..." << endl;
+  append(myoutput, "Output is in '" + output_name + "'", "\n");
   auto& doi_groups = o["doi-groups"];
   for (size_t n = 0; n < doi_groups.size(); ++n) {
     auto& grp = doi_groups[n];

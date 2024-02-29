@@ -23,7 +23,7 @@ using unixutils::mysystem2;
 extern citefind::ConfigData g_config_data;
 extern citefind::Args g_args;
 extern Server g_server;
-extern stringstream g_myoutput, g_mail_message;
+extern stringstream g_mail_message;
 extern std::ofstream g_output;
 
 namespace citefind {
@@ -35,10 +35,10 @@ void clean_up() {
         oss, ess);
   }
   if (!myerror.empty()) {
-    g_mail_message << myerror << endl;
+    g_output << myerror << endl;
   }
-  if (!g_myoutput.str().empty()) {
-    g_mail_message << g_myoutput.str() << endl;
+  if (!myoutput.empty()) {
+    g_mail_message << myoutput << endl;
   }
   if (!g_mail_message.str().empty()) {
     unixutils::sendmail("dattore@ucar.edu", "dattore@ucar.edu", "", "citefind "

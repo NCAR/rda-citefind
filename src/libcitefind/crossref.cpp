@@ -4,7 +4,6 @@
 #include <strutils.hpp>
 #include <utils.hpp>
 #include <json.hpp>
-#include <myerror.hpp>
 
 using std::chrono::seconds;
 using std::endl;
@@ -32,14 +31,13 @@ bool filled_authors_from_cross_ref(string subj_doi, JSON::Object& obj) {
     try {
       obj.fill(ifs);
     } catch (...) {
-      append(myerror, "unable to create JSON object from '" + cfile + "'",
-          "\n");
+      g_output << "unable to create JSON object from '" << cfile << "'" << endl;
       return false;
     }
     ifs.close();
     if (!obj) {
-      append(myerror, "Error reading CrossRef author JSON for works DOI '" +
-          subj_doi + "': 'unable to create JSON object'", "\n");
+      g_output << "Error reading CrossRef author JSON for works DOI '" <<
+          subj_doi << "': 'unable to create JSON object'" << endl;
       stringstream oss, ess;
       mysystem2("/bin/tcsh -c \"/bin/rm -f " + cfile + "\"", oss, ess);
       return false;
@@ -160,8 +158,8 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
         typ = "C";
         auto isbn = sdoi_obj["message"]["ISBN"][0].to_string();
         if (isbn.empty()) {
-          append(myerror, "Error obtaining CrossRef ISBN for book chapter "
-              "(DOI: " + sdoi + ")", "\n");
+          g_output << "Error obtaining CrossRef ISBN for book chapter (DOI: " <<
+              sdoi << ")" << endl;
           continue;
         }
         if (!inserted_book_chapter_works_data(sdoi, sdoi_obj["message"]["page"].
@@ -169,8 +167,8 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
           continue;
         }
         if (!inserted_book_data(isbn)) {
-          append(myerror, "Error inserting ISBN '" + isbn + "' from CrossRef",
-              "\n");
+          g_output << "Error inserting ISBN '" << isbn << "' from CrossRef" <<
+              endl;
           continue;
         }
       } else if (typ == "proceedings-article" || (typ == "posted-content" &&
@@ -187,8 +185,8 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
           continue;
         }
       } else {
-        append(myerror, "**UNKNOWN CrossRef TYPE: " + typ + " for work DOI: '" +
-            sdoi + "' citing '" + doi + "'", "\n");
+        g_output << "**UNKNOWN CrossRef TYPE: " << typ << " for work DOI: '" << 
+            sdoi << "' citing '" << doi << "'" << endl;
         continue;
       }
 
@@ -229,9 +227,9 @@ void query_crossref(const DOI_LIST& doi_list, const SERVICE_DATA&
     string try_error;
     auto ntries = try_crossref(e, service_data, try_error);
     if (ntries == 3) {
-      append(myerror, "Error reading CrossRef JSON for DOI '" + doi + "': '" +
-          try_error + "'\n/bin/tcsh -c \"curl '" + get<2>(service_data) +
-          "?source=crossref&obj-id=" + doi + "'\"", "\n");
+      g_output << "Error reading CrossRef JSON for DOI '" << doi << "': '" << 
+          try_error << "'\n/bin/tcsh -c \"curl '" << get<2>(service_data)<< 
+          "?source=crossref&obj-id=" << doi << "'\"" << endl;
     }
   }
   if (g_args.doi_group.id == "rda") {
@@ -248,13 +246,13 @@ string publisher_from_cross_ref(string subj_doi) {
     try {
       obj.fill(ifs);
     } catch (...) {
-      append(myerror, "unable to create JSON object from '" + filename + "'",
-          "\n");
+      g_output << "unable to create JSON object from '" << filename << "'" <<
+          endl;
       return "";
     }
     if (!obj) {
-      append(myerror, "Error reading CrossRef publisher JSON for works DOI '" +
-          subj_doi + "': 'unable to create JSON object'", "\n");
+      g_output << "Error reading CrossRef publisher JSON for works DOI '" <<
+          subj_doi << "': 'unable to create JSON object'" << endl;
       stringstream oss, ess;
       mysystem2("/bin/tcsh -c \"/bin/rm -f " + filename + "\"", oss, ess);
       return "";

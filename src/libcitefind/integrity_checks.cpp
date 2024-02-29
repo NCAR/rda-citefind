@@ -1,12 +1,14 @@
 #include "../../include/citefind.hpp"
 #include <PostgreSQL.hpp>
+#include <strutils.hpp>
+#include <myerror.hpp>
 
 using namespace PostgreSQL;
 using std::endl;
 using std::stringstream;
+using strutils::append;
 
 extern Server g_server;
-extern stringstream g_myoutput;
 
 namespace citefind {
 
@@ -16,9 +18,9 @@ void print_publisher_list() {
     add_to_error_and_exit("unable to get list of pubishers from 'works' table: "
     "'" + q.error() + "'");
   }
-  g_myoutput << "\nCurrent Publisher List:" << endl;
+  append(myoutput, "Current Publisher List:", "\n");
   for (const auto& r : q) {
-    g_myoutput << "Publisher: '" << r[0] << "'" << endl;
+    append(myoutput, "Publisher: '" + r[0] + "'", "\n");
   }
 }
 
