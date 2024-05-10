@@ -17,6 +17,7 @@ using std::string;
 using std::stringstream;
 using std::to_string;
 using strutils::append;
+using strutils::replace_all;
 using strutils::split;
 using strutils::sql_ready;
 using strutils::substitute;
