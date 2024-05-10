@@ -72,6 +72,7 @@ void parse_args(int argc, char **argv) {
   if (argc < 2 || a1 == "--help") {
     show_usage_and_exit();
   }
+  read_config();
   if (a1 == "--show-doi-groups") {
     show_doi_groups_and_exit();
   }
