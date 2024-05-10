@@ -101,7 +101,6 @@ continue;
 
     // get the WoS ID for the DOI
     stringstream oss, ess;
-std::cerr << "/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL + "/?databaseId=DCI&usrQuery=DO=" + doi + "&count=1&firstRecord=1&viewField=none'\"" << std::endl;
     if (mysystem2("/bin/tcsh -c \"curl -H '" + API_KEY_HEADER + "' '" + API_URL
         + "/?databaseId=DCI&usrQuery=DO=" + doi + "&count=1&firstRecord=1&"
         "viewField=none'\"", oss, ess) < 0) {
