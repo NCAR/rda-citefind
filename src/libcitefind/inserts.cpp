@@ -31,6 +31,8 @@ bool inserted_works_author(string pid, string pid_type, string first_name,
     string middle_name, string last_name, string orcid_id, size_t sequence,
     string whence) {
   string columns = "id, id_type, last_name, first_name, middle_name, sequence";
+  replace_all(last_name, "\\-", "-");
+  replace_all(last_name, "\\'", "'");
   string values = "'" + pid + "', '" + pid_type + "', '" + sql_ready(last_name)
       + "', '" + sql_ready(first_name) + "', '" + sql_ready(middle_name) + "', "
       + to_string(sequence);
