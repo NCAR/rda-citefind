@@ -52,10 +52,15 @@ void add_to_error_and_exit(string msg) {
 }
 
 string convert_unicodes(string value) {
+  replace_all(value, "\\\\u00a0", " ");
   replace_all(value, "\\u00a0", " ");
+  replace_all(value, "\\\\u2010", "-");
   replace_all(value, "\\u2010", "-");
+  replace_all(value, "\\\\u2013", "-");
   replace_all(value, "\\u2013", "-");
+  replace_all(value, "\\\\u2014", "-");
   replace_all(value, "\\u2014", "-");
+  replace_all(value, "\\\\u2019", "'");
   replace_all(value, "\\u2019", "'");
   return value;
 }
