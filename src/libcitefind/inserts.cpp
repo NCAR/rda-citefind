@@ -99,6 +99,8 @@ bool inserted_works_author(string pid, string pid_type, string first_name,
 
 bool inserted_general_works_data(string doi, string title, string pub_year,
     string works_type, string publisher, string service, string service_id) {
+  replace_all(title, "\\\\\"", "\"");
+  replace_all(title, "\\\"", "\"");
   if (g_server.insert(
         "citation.works",
         "doi, title, pub_year, type, publisher",
