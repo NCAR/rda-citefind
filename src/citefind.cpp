@@ -126,9 +126,8 @@ void query_service(string service_id, const citefind::SERVICE_DATA&
 
 int main(int argc, char **argv) {
   atexit(citefind::clean_up);
-  citefind::read_config();
-  citefind::clean_cache();
   citefind::parse_args(argc, argv);
+  citefind::clean_cache();
   create_doi_table();
 //  fill_journal_abbreviations();
 //  fill_journals_no_abbreviation();
