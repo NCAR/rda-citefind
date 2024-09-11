@@ -43,6 +43,23 @@ void check_author_names() {
   }
 }
 
+void check_for_missing_authors() {
+  LocalQuery q("select w.doi, count(a.last_name) from citation.works as w left "
+      "join citation.works_authors as a on a.id = w.doi group by w.doi having "
+      "count(a.last_name) = 0");
+  if (q.submit(g_server) != 0) {
+    append(myoutput, "  **Error checking for missing authors: '" + q.error() +
+        "'", "\n");
+  } else {
+    append(myoutput, "  # of DOIs with missing authors: " + to_string(q.
+        num_rows()), "\n");
+    append(myoutput, "    DOI list:", "\n");
+    for (const auto& r : q) {
+      append(myoutput, "      " + r[0], "\n");
+    }
+  }
+}
+
 void print_publisher_list() {
   LocalQuery q("distinct publisher", "citation.works");
   if (q.submit(g_server) < 0) {
@@ -58,6 +75,7 @@ void print_publisher_list() {
 void run_db_integrity_checks() {
   check_for_empty_titles();
   check_author_names();
+  check_for_missing_authors();
   print_publisher_list();
 }
 
