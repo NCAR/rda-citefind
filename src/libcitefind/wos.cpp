@@ -38,6 +38,9 @@ tuple<string, string> parse_author_first_name(string fname) {
 }
 
 void fill_authors_from_wos(string doi_work, const JSON::Value& v) {
+  if (v.type() == JSON::ValueType::Nonexistent) {
+    return;
+  }
   vector<tuple<string, string, string, string, size_t>> author_names;
   if (v.type() == JSON::ValueType::Array) {
     for (size_t n = 0; n < v.size(); ++n) {
