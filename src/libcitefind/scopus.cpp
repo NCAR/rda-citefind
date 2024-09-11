@@ -6,6 +6,8 @@
 #include <PostgreSQL.hpp>
 #include <strutils.hpp>
 #include <utils.hpp>
+#include <datetime.hpp>
+#include <myerror.hpp>
 
 using namespace PostgreSQL;
 using std::chrono::seconds;
@@ -154,6 +156,20 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
         totres = stoi(doi_obj["search-results"]["opensearch:totalResults"].
             to_string());
       } catch (const std::invalid_argument& e) {
+        if (doi_obj["error-response"]["error-code"].to_string() ==
+            "TOO_MANY_REQUESTS") {
+          g_output << "... exiting Scopus query due to rate limiting" << endl;
+          append(myoutput, "*** exiting Scopus query due to rate limiting",
+              "\n");
+          stringstream oss, ess;
+          mysystem2("/bin/tcsh -c \"curl -s -I '" + url + "' |grep "
+              "'^x-ratelimit-reset' |awk -F: '{print $2}'\"", oss, ess);
+          if (!oss.str().empty()) {
+            auto dt = DateTime(1970, 1, 1, 0, 0).seconds_added(stoi(oss.str()));
+            append(myoutput, " - rate limiting resets at " + dt.to_string());
+          }
+          return;
+        }
         g_output << "invalid JSON for '" << url << "'" << endl;
         continue;
       } catch (...) {
@@ -224,20 +240,24 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
         } else if (typ == "Book" || typ == "Book Series") {
           typ = "C";
           auto isbn = doi_obj["search-results"]["entry"][n]["prism:isbn"][0][
-              "$"].to_string();
-          if (isbn.empty()) {
+              "$"];
+          if (isbn.type() == JSON::ValueType::Array) {
+            isbn = isbn[0];
+          }
+          auto s_isbn = isbn.to_string();
+          if (s_isbn.empty()) {
             g_output << "Error obtaining Elsevier ISBN for book chapter (DOI: "
                 << sdoi << ")" << endl;
             continue;
           }
           if (!inserted_book_chapter_works_data(sdoi, doi_obj["search-results"][
               "entry"][n]["prism:pageRange"].to_string(),
-              isbn, get<0>(service_data))) {
+              s_isbn, get<0>(service_data))) {
             continue;
           }
-          if (!inserted_book_data(isbn, g_config_data.tmpdir)) {
-            g_output << "Error inserting ISBN '" << isbn << "' from Elsevier" <<
-                endl;
+          if (!inserted_book_data(s_isbn, g_config_data.tmpdir)) {
+            g_output << "Error inserting ISBN '" << s_isbn << "' from Elsevier"
+                << endl;
             continue;
           }
         } else if (typ == "Conference Proceeding") {
