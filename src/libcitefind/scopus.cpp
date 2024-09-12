@@ -23,6 +23,7 @@ using std::unordered_map;
 using strutils::append;
 using strutils::replace_all;
 using strutils::split;
+using strutils::trim;
 using unixutils::mysystem2;
 
 extern citefind::ConfigData g_config_data;
@@ -240,24 +241,25 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
         } else if (typ == "Book" || typ == "Book Series") {
           typ = "C";
           auto isbn = doi_obj["search-results"]["entry"][n]["prism:isbn"][0][
-              "$"];
-          if (isbn.type() == JSON::ValueType::Array) {
-            isbn = isbn[0];
-          }
-          auto s_isbn = isbn.to_string();
-          if (s_isbn.empty()) {
+              "$"].to_string();
+          if (isbn.empty()) {
             g_output << "Error obtaining Elsevier ISBN for book chapter (DOI: "
                 << sdoi << ")" << endl;
             continue;
+          } else if (isbn.front() == '[' && isbn.back() == ']') {
+            isbn.pop_back();
+            auto sp = split(isbn.substr(1), ",");
+            isbn = sp.front();
+            trim(isbn);
           }
           if (!inserted_book_chapter_works_data(sdoi, doi_obj["search-results"][
               "entry"][n]["prism:pageRange"].to_string(),
-              s_isbn, get<0>(service_data))) {
+              isbn, get<0>(service_data))) {
             continue;
           }
-          if (!inserted_book_data(s_isbn, g_config_data.tmpdir)) {
-            g_output << "Error inserting ISBN '" << s_isbn << "' from Elsevier"
-                << endl;
+          if (!inserted_book_data(isbn, g_config_data.tmpdir)) {
+            g_output << "Error inserting ISBN '" << isbn << "' from Elsevier" <<
+                endl;
             continue;
           }
         } else if (typ == "Conference Proceeding") {
