@@ -192,23 +192,14 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
       }
 
       // add general data about the "work"
-      auto pubyr = sdoi_obj["message"]["published-print"]["date-parts"][0][0].
-          to_string();
-      if (pubyr.empty()) {
-        if (typ == "P") {
-          pubyr = sdoi_obj["message"]["issued"]["date-parts"][0][0].to_string();
-          auto sp = split(pubyr, ",");
-          pubyr = sp.front();
-        } else {
-          pubyr = sdoi_obj["message"]["published-online"]["date-parts"][0][0].
-              to_string();
-        }
-      }
+      auto dp = sdoi_obj["message"]["created"]["date-parts"][0];
+      auto pubyr = dp[0].to_string();
+      auto pubmo = dp[1].to_string();
       auto ttl = convert_unicodes(repair_string(sdoi_obj["message"]["title"][0].
           to_string()));
       auto publisher = sdoi_obj["message"]["publisher"].to_string();
-      if (!inserted_general_works_data(sdoi, ttl, pubyr, typ, publisher, get<0>(
-          service_data), "")) {
+      if (!inserted_general_works_data(sdoi, ttl, pubyr, pubmo, typ, publisher,
+          get<0>(service_data), "")) {
         continue;
       }
     }

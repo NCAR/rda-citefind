@@ -254,6 +254,17 @@ continue;
       // add general data about the "work"
       auto pubyr = pub_info["pubyear"].to_string();
       if (!pubyr.empty()) {
+        string pubmo = "0";
+        auto sd = pub_info["sortdate"].to_string();
+        if (!sd.empty()) {
+          auto sp = split(sd, "-");
+          if (sp.size() == 3) {
+            pubmo = sp[1];
+            if (pubmo[0] == '0') {
+              pubmo.erase(0, 1);
+            }
+          }
+        }
         auto& p = summary["publishers"]["publisher"]["names"]["name"];
         auto publisher = p["unified_name"].to_string();
         if (publisher.empty()) {
@@ -263,8 +274,8 @@ continue;
           g_output << "**NO WoS PUBLISHER (" << work_id << ")" << endl;
           continue;
         }
-        if (!inserted_general_works_data(doi_work, item_title, pubyr, pubtype,
-            publisher, get<0>(service_data), work_id)) {
+        if (!inserted_general_works_data(doi_work, item_title, pubyr, pubmo,
+            pubtype, publisher, get<0>(service_data), work_id)) {
           continue;
         }
       } else {

@@ -99,19 +99,21 @@ bool inserted_works_author(string pid, string pid_type, string first_name,
 }
 
 bool inserted_general_works_data(string doi, string title, string pub_year,
-    string works_type, string publisher, string service, string service_id) {
+    string pub_month, string works_type, string publisher, string service,
+    string service_id) {
   replace_all(title, "\\\\\"", "\"");
   replace_all(title, "\\\"", "\"");
   if (g_server.insert(
         "citation.works",
-        "doi, title, pub_year, type, publisher",
+        "doi, title, pub_year, type, publisher, pub_month",
         "'" + doi + "', '" + sql_ready(title) + "', '" + pub_year + "', '" +
-            works_type + "', '" + sql_ready(publisher) + "'",
+            works_type + "', '" + sql_ready(publisher) + "', '" + pub_month +
+            "'",
         "on constraint works_pkey do update set title = case when length("
             "excluded.title) > length(works.title) then excluded.title "
             "else works.title end, publisher = case when length(excluded."
             "publisher) > length(works.publisher) then excluded.publisher "
-            "else works.publisher end"
+            "else works.publisher end, pub_month = excluded.pub_month"
         ) < 0) {
     g_output << "Error while inserting " << service << "(" << service_id << ") "
         "work (" << doi << "," << title << "," << pub_year << "," << works_type

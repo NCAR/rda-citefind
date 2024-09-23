@@ -277,9 +277,14 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
         }
 
         // add general data about the "work"
-        auto pubyr = doi_obj["search-results"]["entry"][n]["prism:coverDate"].
-            to_string().substr(0, 4);
-        if (!pubyr.empty()) {
+        auto cd = doi_obj["search-results"]["entry"][n]["prism:coverDate"].
+            to_string();
+        if (!cd.empty()) {
+          auto pubyr = cd.substr(0, 4);
+          auto pubmo = cd.substr(5, 2);
+          if (pubmo[0] == '0') {
+            pubmo.erase(0, 1);
+          }
           auto ttl = repair_string(doi_obj["search-results"]["entry"][n][
               "dc:title"].to_string());
           auto publisher = author_obj["abstracts-retrieval-response"][
@@ -299,8 +304,8 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
               }
             }
           }
-          if (!inserted_general_works_data(sdoi, ttl, pubyr, typ, publisher,
-              get<0>(service_data), scopus_url)) {
+          if (!inserted_general_works_data(sdoi, ttl, pubyr, pubmo, typ,
+              publisher, get<0>(service_data), scopus_url)) {
             continue;
           }
         } else {
