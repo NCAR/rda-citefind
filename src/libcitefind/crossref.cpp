@@ -32,6 +32,8 @@ bool filled_authors_from_cross_ref(string subj_doi, JSON::Object& obj) {
       obj.fill(ifs);
     } catch (...) {
       g_output << "unable to create JSON object from '" << cfile << "'" << endl;
+      stringstream oss, ess;
+      mysystem2("/bin/tcsh -c \"/bin/rm -f " + cfile + "\"", oss, ess);
       return false;
     }
     ifs.close();
@@ -192,15 +194,27 @@ size_t try_crossref(const DOI_DATA& doi_data, const SERVICE_DATA& service_data,
       }
 
       // add general data about the "work"
-      auto dp = sdoi_obj["message"]["created"]["date-parts"][0];
-      auto pubyr = dp[0].to_string();
-      auto pubmo = dp[1].to_string();
-      auto ttl = convert_unicodes(repair_string(sdoi_obj["message"]["title"][0].
-          to_string()));
-      auto publisher = sdoi_obj["message"]["publisher"].to_string();
-      if (!inserted_general_works_data(sdoi, ttl, pubyr, pubmo, typ, publisher,
-          get<0>(service_data), "")) {
-        continue;
+      auto dp = sdoi_obj["message"]["published"]["date-parts"][0];
+      if (dp.type() == JSON::ValueType::Nonexistent || dp.size() < 2) {
+        dp = sdoi_obj["message"]["published-print"]["date-parts"][0];
+      }
+      if (dp.type() == JSON::ValueType::Nonexistent || dp.size() < 2) {
+        dp = sdoi_obj["message"]["published-online"]["date-parts"][0];
+      }
+      if (dp.type() == JSON::ValueType::Array && dp.size() >= 2) {
+        auto pubyr = dp[0].to_string();
+        auto pubmo = dp[1].to_string();
+        auto ttl = convert_unicodes(repair_string(sdoi_obj["message"]["title"][
+            0].to_string()));
+        auto publisher = sdoi_obj["message"]["publisher"].to_string();
+        if (!inserted_general_works_data(sdoi, ttl, pubyr, pubmo, typ,
+            publisher, get<0>(service_data), "")) {
+          continue;
+        }
+      } else {
+std::cerr << "***NO OR BAD PUBLISHER DATE " << sdoi << " " << doi << std::endl;
+        g_output << "**NO OR BAD PUBLISHER DATE for work DOI: '" << sdoi <<
+            "' citing '" << doi << "'" << endl;
       }
     }
     try_error = "";
@@ -240,6 +254,8 @@ string publisher_from_cross_ref(string subj_doi) {
     } catch (...) {
       g_output << "unable to create JSON object from '" << filename << "'" <<
           endl;
+      stringstream oss, ess;
+      mysystem2("/bin/tcsh -c \"/bin/rm -f " + filename + "\"", oss, ess);
       return "";
     }
     if (!obj) {

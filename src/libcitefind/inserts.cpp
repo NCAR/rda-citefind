@@ -113,7 +113,7 @@ bool inserted_general_works_data(string doi, string title, string pub_year,
             "excluded.title) > length(works.title) then excluded.title "
             "else works.title end, publisher = case when length(excluded."
             "publisher) > length(works.publisher) then excluded.publisher "
-            "else works.publisher end, pub_month = excluded.pub_month"
+            "else works.publisher end"
         ) < 0) {
     g_output << "Error while inserting " << service << "(" << service_id << ") "
         "work (" << doi << "," << title << "," << pub_year << "," << works_type

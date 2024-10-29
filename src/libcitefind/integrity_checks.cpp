@@ -1,6 +1,7 @@
 #include "../../include/citefind.hpp"
 #include <PostgreSQL.hpp>
 #include <strutils.hpp>
+#include <datetime.hpp>
 #include <myerror.hpp>
 
 using namespace PostgreSQL;
@@ -72,10 +73,31 @@ void print_publisher_list() {
   }
 }
 
+void check_for_bad_publication_months() {
+  LocalQuery q("*", "citation.works", "pub_month = 0");
+  if (q.submit(g_server) != 0) {
+    append(myoutput, "  **Error checking for missing publication months: '" + q.
+        error() + "'", "\n");
+  } else {
+    append(myoutput, "  # works without a publication month: " + to_string(q.
+        num_rows()), "\n");
+  }
+  auto curr_mo = dateutils::current_date_time().to_string("%Y%m");
+  q.set("*", "citation.works", "pub_year*100+pub_month > " + curr_mo);
+  if (q.submit(g_server) != 0) {
+    append(myoutput, "  **Error checking for future publication months: '" + q.
+        error() + "'", "\n");
+  } else {
+    append(myoutput, "  # works with a future publication month: " + to_string(q.
+        num_rows()), "\n");
+  }
+}
+
 void run_db_integrity_checks() {
   check_for_empty_titles();
   check_author_names();
   check_for_missing_authors();
+  check_for_bad_publication_months();
   print_publisher_list();
 }
 

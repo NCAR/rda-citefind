@@ -281,9 +281,12 @@ void query_elsevier(const DOI_LIST& doi_list, const SERVICE_DATA&
             to_string();
         if (!cd.empty()) {
           auto pubyr = cd.substr(0, 4);
-          auto pubmo = cd.substr(5, 2);
-          if (pubmo[0] == '0') {
-            pubmo.erase(0, 1);
+          string pubmo = "0";
+          if (cd.length() >= 7) {
+            pubmo = cd.substr(5, 2);
+            if (pubmo[0] == '0') {
+              pubmo.erase(0, 1);
+            }
           }
           auto ttl = repair_string(doi_obj["search-results"]["entry"][n][
               "dc:title"].to_string());
