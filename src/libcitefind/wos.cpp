@@ -1,14 +1,18 @@
 #include "../../include/citefind.hpp"
 #include <fstream>
+#include <thread>
+#include <chrono>
 #include <sys/stat.h>
 #include <strutils.hpp>
 #include <utils.hpp>
 
+using namespace std::chrono_literals;
 using std::endl;
 using std::get;
 using std::ifstream;
 using std::string;
 using std::stringstream;
+using std::this_thread::sleep_for;
 using std::to_string;
 using std::tuple;
 using std::vector;
@@ -110,6 +114,7 @@ continue;
       g_output << "Error getting WoS ID for DOI '" << doi << "'" << endl;
       continue;
     }
+    sleep_for(600ms);
     JSON::Object o(oss.str());
     if (!o) {
       g_output << "Wos response for DOI '" << doi << "' ID is not JSON" << endl;
@@ -136,6 +141,7 @@ continue;
             endl;
         continue;
       }
+      sleep_for(600ms);
       o.fill(oss.str());
       auto& arr = o["Data"]["Records"]["records"]["REC"];
       if (arr.type() != JSON::ValueType::Nonexistent) {
@@ -166,6 +172,7 @@ continue;
               << doi << ")" << endl;
           continue;
         }
+        sleep_for(600ms);
       }
       ifstream ifs(cache_fn.c_str());
       o.fill(ifs);
