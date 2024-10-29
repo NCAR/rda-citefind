@@ -69,7 +69,7 @@ void read_config() {
       current_date_time().to_string("%Y%m%d%H%MM");
   g_output.open(output_name);
   g_output << "Configuration file open and ready to parse ..." << endl;
-  append(myoutput, "Output is in '" + output_name + "'", "\n");
+  append(myoutput, "Output is in\n   " + output_name, "\n");
   auto& doi_groups = o["doi-groups"];
   for (size_t n = 0; n < doi_groups.size(); ++n) {
     auto& grp = doi_groups[n];
